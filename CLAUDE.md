@@ -51,7 +51,7 @@ The path of `cases.json` may be given as an argument; the default is `~/Projects
 
 - [x] M0: Project skeleton, icon, `Package.swift`
 - [x] M1: `Library.swift`, passing `cases.json`
-- [ ] M2: Folder, thumbnails, the gallery of all images (written, not yet checked on the iPad)
+- [x] M2: Folder, thumbnails, the gallery of all images
 - [ ] M3: The image page: paging, zoom, sharing
 - [ ] M4: Editing: inspector, saving, suggestions, read-only sidecars
 - [ ] M5: Tags tab, tag galleries
