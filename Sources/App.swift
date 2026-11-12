@@ -92,6 +92,14 @@ final class Shelf {
     }
 }
 
+/// The pages above the top page
+enum Page: Hashable {
+    /// A tag's gallery
+    case tag(String)
+    /// An image, in the gallery `ids` it was opened from
+    case image(ids: [String], index: Int)
+}
+
 /// Thumbnail sizes: the smallest width of a tile, in points
 enum Zoom: Double, CaseIterable {
     case small = 80, medium = 120, large = 160
@@ -108,14 +116,21 @@ enum Zoom: Double, CaseIterable {
 struct RootView: View {
     @Environment(Shelf.self) private var shelf
     @AppStorage("zoom") private var zoom = Zoom.medium.rawValue
+    @State private var path: [Page] = []
     @State private var query = ""
     @State private var choosing = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle("Illust Shelf")
                 .toolbar { menu }
+                .navigationDestination(for: Page.self) { page in
+                    switch page {
+                    case .image(let ids, let index): Detail(ids: ids, index: index)
+                    case .tag: EmptyView()
+                    }
+                }
         }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
             switch result {

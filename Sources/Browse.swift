@@ -16,8 +16,11 @@ struct Gallery: View {
         let shown = ids.filter { shelf.library.get($0) != nil }
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: zoom), spacing: 2)], spacing: 2) {
-                ForEach(shown, id: \.self) { id in
-                    Thumbnail(file: shelf.library.file(id), thumb: shelf.thumb(id))
+                ForEach(Array(shown.enumerated()), id: \.element) { index, id in
+                    NavigationLink(value: Page.image(ids: shown, index: index)) {
+                        Thumbnail(file: shelf.library.file(id), thumb: shelf.thumb(id))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

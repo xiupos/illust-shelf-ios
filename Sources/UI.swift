@@ -85,6 +85,138 @@ enum Thumbnails {
     }
 }
 
+/// The image to show on its page: at most `maxPixels` on its long side, which is enough to zoom
+/// into and keeps the pages next to it in memory. EXIF orientation is applied
+func loadImage(_ file: URL, maxPixels: Int = 3072) async -> UIImage? {
+    guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+    ]
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    return UIImage(cgImage: image)
+}
+
+/// An image that fits its space and zooms with a pinch or a double tap, in a UIScrollView: the
+/// pages around it scroll when it is not zoomed or is at its edge, as in Photos
+struct ZoomableImage: UIViewRepresentable {
+    let image: UIImage
+    /// The image is fitted inside these, and can be scrolled out from under them when zoomed
+    let insets: UIEdgeInsets
+    let onTap: () -> Void
+
+    func makeUIView(context: Context) -> ZoomView {
+        let view = ZoomView()
+        view.delegate = context.coordinator
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTapped(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped))
+        tap.require(toFail: doubleTap)
+        view.addGestureRecognizer(doubleTap)
+        view.addGestureRecognizer(tap)
+        return view
+    }
+
+    func updateUIView(_ view: ZoomView, context: Context) {
+        context.coordinator.onTap = onTap
+        view.fitInsets = insets
+        if view.imageView.image !== image {
+            view.imageView.image = image
+            view.setZoomScale(1, animated: false)
+            view.setNeedsLayout()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap)
+    }
+
+    final class Coordinator: NSObject, UIScrollViewDelegate {
+        var onTap: () -> Void
+
+        init(onTap: @escaping () -> Void) {
+            self.onTap = onTap
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            (scrollView as? ZoomView)?.imageView
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            (scrollView as? ZoomView)?.center()
+        }
+
+        @objc func tapped() {
+            onTap()
+        }
+
+        @objc func doubleTapped(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? ZoomView else { return }
+            if view.zoomScale > 1 {
+                view.setZoomScale(1, animated: true)
+            } else {
+                let point = recognizer.location(in: view.imageView)
+                let size = CGSize(width: view.bounds.width / 2.5, height: view.bounds.height / 2.5)
+                let rect = CGRect(x: point.x - size.width / 2, y: point.y - size.height / 2, width: size.width, height: size.height)
+                view.zoom(to: rect, animated: true)
+            }
+        }
+    }
+
+    final class ZoomView: UIScrollView {
+        let imageView = UIImageView()
+        var fitInsets = UIEdgeInsets.zero {
+            didSet { if fitInsets != oldValue { setNeedsLayout() } }
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            minimumZoomScale = 1
+            maximumZoomScale = 6
+            showsHorizontalScrollIndicator = false
+            showsVerticalScrollIndicator = false
+            contentInsetAdjustmentBehavior = .never
+            decelerationRate = .fast
+            imageView.contentMode = .scaleAspectFit
+            addSubview(imageView)
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is not used")
+        }
+
+        /// Not zoomed, the image fits inside `fitInsets`, still
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            let area = bounds.inset(by: fitInsets)
+            guard zoomScale == minimumZoomScale, let size = imageView.image?.size,
+                  size.width > 0, size.height > 0, area.width > 0, area.height > 0
+            else { return center() }
+            let fit = min(area.width / size.width, area.height / size.height)
+            let fitted = CGSize(width: size.width * fit, height: size.height * fit)
+            if imageView.frame.size != fitted {
+                imageView.frame = CGRect(origin: .zero, size: fitted)
+                contentSize = fitted
+            }
+            center()
+            if !isTracking && !isDecelerating && !isZooming {
+                contentOffset = CGPoint(x: -contentInset.left, y: -contentInset.top)
+            }
+        }
+
+        /// Keeps an image smaller than the area inside `fitInsets` in its middle
+        func center() {
+            let area = bounds.inset(by: fitInsets)
+            let dx = max(0, (area.width - contentSize.width) / 2)
+            let dy = max(0, (area.height - contentSize.height) / 2)
+            contentInset = UIEdgeInsets(top: fitInsets.top + dy, left: fitInsets.left + dx,
+                                        bottom: fitInsets.bottom + dy, right: fitInsets.right + dx)
+        }
+    }
+}
+
 /// The SHA-1 of a text, in hex: names a thumbnail after an image's ID
 func sha1(_ text: String) -> String {
     Insecure.SHA1.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
