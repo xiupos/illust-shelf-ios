@@ -319,7 +319,9 @@ private struct LinkRow<Content: View>: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .foregroundStyle(.primary)
+        // `Color.primary`, not `.primary`: in a button, `.primary` is the button's tint, and the
+        // `.secondary` and `.tertiary` inside are made from it
+        .foregroundStyle(Color.primary)
         .contentShape(.rect)
     }
 }
