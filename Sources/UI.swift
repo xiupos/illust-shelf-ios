@@ -333,6 +333,8 @@ struct ZoomableImage: UIViewRepresentable {
             showsVerticalScrollIndicator = false
             contentInsetAdjustmentBehavior = .never
             decelerationRate = .fast
+            // The image is under the viewer's bars, which have no title: not blurred at its top
+            topEdgeEffect.isHidden = true
             imageView.contentMode = .scaleAspectFit
             addSubview(imageView)
         }
