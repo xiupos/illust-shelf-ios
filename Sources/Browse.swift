@@ -138,6 +138,10 @@ struct TagsPage: View {
         }
         .navigationTitle("Tags")
         .toolbarTitleDisplayMode(.inlineLarge)
+        .addsImages()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { LibraryMenu() }
+        }
     }
 }
 
@@ -151,13 +155,14 @@ private func heading(_ namespace: String) -> String {
 struct NamespacePage: View {
     let namespace: String
     @Environment(Shelf.self) private var shelf
+    @AppStorage("tileSize") private var tileSize = TileSize.medium
 
     var body: some View {
         let tags = namespace.isEmpty
             ? shelf.tags.filter { $0.namespace.isEmpty }
             : searchTags(shelf.tags, namespace + ":")
         ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: TagCard.width), spacing: 12, alignment: .top)], spacing: 20) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: tileSize.card), spacing: 12, alignment: .top)], spacing: 20) {
                 ForEach(tags) { TagCard(tag: $0) }
             }
             .padding()
@@ -176,7 +181,7 @@ struct TagPage: View {
         Gallery(tag: tag, query: query)
             .navigationTitle(tag)
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query)
+            .searchable(text: $query, placement: .navigationBarDrawer)
     }
 }
 
@@ -184,13 +189,14 @@ struct TagPage: View {
 struct TagShelf: View {
     let tags: [Tag]
     var fullNames = false
+    @AppStorage("tileSize") private var tileSize = TileSize.medium
 
     var body: some View {
         ScrollView(.horizontal) {
             LazyHStack(alignment: .top, spacing: 12) {
                 ForEach(tags) { tag in
                     TagCard(tag: tag, fullName: fullNames)
-                        .frame(width: TagCard.width)
+                        .frame(width: tileSize.card)
                 }
             }
             .padding(.horizontal)
@@ -201,8 +207,6 @@ struct TagShelf: View {
 
 /// A tag, as an album is shown in Photos: its cover, its name, and the number of its images
 struct TagCard: View {
-    static let width: CGFloat = 132
-
     let tag: Tag
     /// With the namespace, where tags of several are shown together
     var fullName = false
@@ -250,7 +254,8 @@ struct SearchPage: View {
         }
         .navigationTitle("Search")
         .toolbarTitleDisplayMode(.inlineLarge)
-        .searchable(text: $query, prompt: "Titles, Notes, and Tags")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Titles, Notes, and Tags")
         .textInputAutocapitalization(.never)
     }
 }

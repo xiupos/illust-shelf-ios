@@ -211,6 +211,7 @@ private func copy(of provider: NSItemProvider, into folder: URL) async -> URL? {
 /// Library, Tags, and Search, as in Photos. Before a folder is chosen, an invitation to choose one
 struct RootView: View {
     @Environment(Shelf.self) private var shelf
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         @Bindable var shelf = shelf
@@ -232,8 +233,17 @@ struct RootView: View {
                     Tab("Tags", systemImage: "tag") {
                         Stack { TagsPage() }
                     }
-                    Tab(role: .search) {
-                        Stack { SearchPage() }
+                    // A search tab where the tab bar is at the top: a magnifying glass. Where it is
+                    // at the bottom, an ordinary tab: a search tab would make the bar the search
+                    // field, at the bottom
+                    if sizeClass == .regular {
+                        Tab(role: .search) {
+                            Stack { SearchPage() }
+                        }
+                    } else {
+                        Tab("Search", systemImage: "magnifyingglass") {
+                            Stack { SearchPage() }
+                        }
                     }
                 }
             }
@@ -317,7 +327,7 @@ struct Stack<Root: View>: View {
 
 // MARK: - Settings
 
-/// Thumbnail sizes
+/// Thumbnail sizes, and the sizes of the tags' cards that go with them
 enum TileSize: String, CaseIterable {
     case small, medium, large
 
@@ -337,9 +347,18 @@ enum TileSize: String, CaseIterable {
         case .large: 180
         }
     }
+
+    /// The width of a tag's card, in points
+    var card: CGFloat {
+        switch self {
+        case .small: 100
+        case .medium: 132
+        case .large: 180
+        }
+    }
 }
 
-/// The Library tab's menu: the thumbnail size and the folder
+/// The menu of the Library and Tags tabs: the thumbnail size and the folder
 struct LibraryMenu: View {
     @Environment(Shelf.self) private var shelf
     @AppStorage("tileSize") private var tileSize = TileSize.medium
