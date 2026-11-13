@@ -1,20 +1,23 @@
-// One image, with previous / next through the gallery it was opened from. The counterpart of
-// src/detail.rs of the GTK app
+// One image: the viewer, which pages through the gallery the image was opened from, and the Info
+// panel, which edits its sidecar. The counterpart of src/detail.rs of the GTK app
 
 import SwiftUI
 
-struct Detail: View {
+// MARK: - Viewer
+
+/// The images of a gallery, one at a time, as Photos shows them: swipe for the next, pinch or
+/// double tap to zoom, tap to hide the bars
+struct Viewer: View {
     /// The gallery the image was opened from
     let ids: [String]
     @State private var current: String
-    @State private var position: ScrollPosition
-    @State private var barsHidden = false
+    @State private var bars = Bars()
+    @State private var showsInfo = false
     @Environment(Shelf.self) private var shelf
 
-    init(ids: [String], index: Int) {
+    init(ids: [String], start: String) {
         self.ids = ids
-        _current = State(initialValue: ids[index])
-        _position = State(initialValue: ScrollPosition(id: ids[index]))
+        _current = State(initialValue: start)
     }
 
     var body: some View {
@@ -23,40 +26,35 @@ struct Detail: View {
         // so that it can tell where the bars are: one that ignores it is told of no insets
         GeometryReader { geometry in
             let safe = geometry.safeAreaInsets
-            let width = geometry.size.width + safe.leading + safe.trailing
-            let height = geometry.size.height + safe.top + safe.bottom
-            let insets = barsHidden
-                ? UIEdgeInsets.zero
-                : UIEdgeInsets(top: safe.top, left: safe.leading, bottom: safe.bottom, right: safe.trailing)
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(ids, id: \.self) { id in
-                        ImagePage(file: shelf.library.file(id), insets: insets) {
-                            withAnimation { barsHidden.toggle() }
-                        }
-                        .frame(width: width, height: height)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollIndicators(.hidden)
-            .scrollPosition($position)
-            .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.5) { visible in
-                if let id = visible.first { current = id }
+            let insets = UIEdgeInsets(top: safe.top, left: safe.leading, bottom: safe.bottom, right: safe.trailing)
+            Pager(ids: ids, current: $current) { id in
+                ImagePage(file: shelf.library.file(id), bars: bars)
             }
             .ignoresSafeArea()
-        }
-        .background(barsHidden ? Color.black : Color(uiColor: .systemBackground))
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(barsHidden ? .hidden : .visible, for: .navigationBar)
-        .statusBarHidden(barsHidden)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                ShareLink(item: shelf.library.file(current))
+            .onChange(of: insets, initial: true) { _, insets in
+                bars.safeArea = insets
             }
         }
+        .background(bars.hidden ? Color.black : Color(uiColor: .systemBackground))
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarVisibility(bars.hidden ? .hidden : .visible, for: .navigationBar)
+        .statusBarHidden(bars.hidden)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                ShareLink(item: shelf.library.file(current))
+                Button("Info", systemImage: "info.circle") { showsInfo.toggle() }
+            }
+        }
+        .inspector(isPresented: $showsInfo) {
+            // Made anew for each image: the old one saves as it goes
+            Info(id: current)
+                .id(current)
+                .inspectorColumnWidth(min: 280, ideal: 340)
+                .presentationDetents([.medium, .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+        }
+        .zoomDestination(current)
     }
 
     /// The image's title, or its file name
@@ -66,19 +64,32 @@ struct Detail: View {
     }
 }
 
+/// Whether the viewer's bars are hidden, and where they are. Shared with the pages, which the
+/// pager keeps outside the viewer's own view tree
+@MainActor
+@Observable
+private final class Bars {
+    var hidden = false
+    /// The viewer's safe area: the bars, while they are shown
+    var safeArea = UIEdgeInsets.zero
+
+    /// What the image is fitted inside
+    var insets: UIEdgeInsets { hidden ? .zero : safeArea }
+}
+
 /// One page: the image, decoded off the main thread, to zoom into
 private struct ImagePage: View {
     let file: URL
-    /// Where the bars are, which the image is fitted between
-    let insets: UIEdgeInsets
-    let onTap: () -> Void
+    let bars: Bars
     @State private var image: UIImage?
     @State private var failed = false
 
     var body: some View {
         Group {
             if let image {
-                ZoomableImage(image: image, insets: insets, onTap: onTap)
+                ZoomableImage(image: image, insets: bars.insets) {
+                    withAnimation { bars.hidden.toggle() }
+                }
             } else if failed {
                 ContentUnavailableView("Cannot Show the Image", systemImage: "exclamationmark.triangle")
             } else {
@@ -89,5 +100,217 @@ private struct ImagePage: View {
             image = await loadImage(file)
             failed = image == nil
         }
+    }
+}
+
+// MARK: - Info
+
+/// The image's title, note, tags, and URLs, to edit, and facts about its file. Edits are saved as
+/// they are made: text half a second after the last change and when the panel goes, tags and
+/// URLs at once
+private struct Info: View {
+    let id: String
+    @Environment(Shelf.self) private var shelf
+    @Environment(Router.self) private var router
+    @Environment(\.openURL) private var openURL
+    @State private var meta = Meta()
+    /// What was read or last saved: an image that is only looked at is never written
+    @State private var saved = Meta()
+    @State private var editable = true
+    @State private var loaded = false
+    @State private var file = FileInfo()
+    @State private var newTag = ""
+    @State private var newURL = ""
+    @FocusState private var focus: Field?
+
+    private enum Field { case tag, url }
+
+    var body: some View {
+        Form {
+            if loaded && !editable {
+                Section {
+                    Label("This image's sidecar can't be edited: it is unreadable, or made by a newer version.",
+                          systemImage: "lock")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                TextField("Title", text: $meta.title, axis: .vertical)
+                TextField("Note", text: $meta.note, axis: .vertical)
+                    .lineLimit(3...)
+            }
+            .disabled(!editable)
+            Section("Tags") {
+                ForEach(meta.tags, id: \.self, content: tagRow)
+                    .onDelete { remove($0, from: \.tags) }
+                    .deleteDisabled(!editable)
+                if editable {
+                    addField("Add Tag", text: $newTag, field: .tag, to: \.tags)
+                    // Rows to choose: the text being typed is never changed (input methods)
+                    ForEach(suggest(shelf.tags.map(\.name), attached: meta.tags, text: newTag), id: \.self) { tag in
+                        Button {
+                            add(tag, to: \.tags)
+                            newTag = ""
+                        } label: {
+                            Text(verbatim: tag)
+                        }
+                    }
+                }
+            }
+            Section("Sources") {
+                ForEach(meta.urls, id: \.self, content: urlRow)
+                    .onDelete { remove($0, from: \.urls) }
+                    .deleteDisabled(!editable)
+                if editable {
+                    addField("Add URL", text: $newURL, field: .url, to: \.urls)
+                        .keyboardType(.URL)
+                }
+            }
+            Section("File") {
+                let parts = id.split(separator: "/")
+                LabeledContent("Name") {
+                    Text(verbatim: String(parts.last ?? "")).lineLimit(1).truncationMode(.middle)
+                }
+                if parts.count > 1 {
+                    LabeledContent("Folder") {
+                        Text(verbatim: parts.dropLast().joined(separator: "/")).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                if let pixels = file.pixels {
+                    LabeledContent("Dimensions", value: "\(Int(pixels.width)) × \(Int(pixels.height))")
+                }
+                if let size = file.size {
+                    LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                }
+                if let modified = file.modified {
+                    LabeledContent("Modified") { Text(modified, format: .dateTime) }
+                }
+                if let added = meta.added.flatMap({ ISO8601DateFormatter().date(from: $0) }) {
+                    LabeledContent("Added") { Text(added, format: .dateTime) }
+                }
+            }
+        }
+        .onAppear(perform: load)
+        .onDisappear(perform: save)
+        .task(id: meta) {
+            try? await Task.sleep(for: .milliseconds(500))
+            if !Task.isCancelled { save() }
+        }
+    }
+
+    /// A tag: its name, with its namespace after it. Tapped, it opens the tag's gallery
+    private func tagRow(_ name: String) -> some View {
+        let tag = Tag(name: name, count: 0, cover: "")
+        return Button { router.open(tag: name) } label: {
+            LinkRow(systemImage: "chevron.forward") {
+                LabeledContent {
+                    Text(verbatim: tag.namespace)
+                } label: {
+                    Text(verbatim: tag.short)
+                }
+            }
+        }
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = name }
+        }
+    }
+
+    /// A URL: its site, with the whole URL under it. Tapped, it opens
+    private func urlRow(_ text: String) -> some View {
+        let url = URL(string: text)
+        let host = url?.host().map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 }
+        return Button { if let url { openURL(url) } } label: {
+            LinkRow(systemImage: "arrow.up.forward") {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: host ?? text)
+                    if host != nil {
+                        Text(verbatim: text)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+        }
+        .contextMenu {
+            Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = text }
+        }
+    }
+
+    /// A field that adds what is typed when Return is pressed, and stays for the next one
+    private func addField(_ title: LocalizedStringKey, text: Binding<String>, field: Field,
+                          to list: WritableKeyPath<Meta, [String]>) -> some View {
+        TextField(title, text: text)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .focused($focus, equals: field)
+            .onSubmit {
+                add(text.wrappedValue, to: list)
+                text.wrappedValue = ""
+                focus = field
+            }
+    }
+
+    /// The sidecar is read again each time the image is opened for editing
+    private func load() {
+        shelf.refresh(id)
+        if let item = shelf.library.get(id) {
+            meta = item.meta
+            saved = item.meta
+            editable = item.editable
+        }
+        file = FileInfo(shelf.library.file(id))
+        loaded = true
+    }
+
+    private func save() {
+        guard loaded, editable, meta != saved else { return }
+        shelf.save(id, meta)
+        saved = meta
+    }
+
+    private func add(_ value: String, to list: WritableKeyPath<Meta, [String]>) {
+        if pushUnique(&meta[keyPath: list], value) { save() }
+    }
+
+    private func remove(_ offsets: IndexSet, from list: WritableKeyPath<Meta, [String]>) {
+        meta[keyPath: list].remove(atOffsets: offsets)
+        save()
+    }
+}
+
+/// A row that goes somewhere when tapped: its content in the text's colour, and a small symbol
+/// at its end, as a navigation link has
+private struct LinkRow<Content: View>: View {
+    let systemImage: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: systemImage)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .foregroundStyle(.primary)
+        .contentShape(.rect)
+    }
+}
+
+/// What the File section shows
+private struct FileInfo {
+    var size: Int64?
+    var modified: Date?
+    var pixels: CGSize?
+
+    init() {}
+
+    init(_ url: URL) {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        size = (attributes?[.size] as? NSNumber)?.int64Value
+        modified = attributes?[.modificationDate] as? Date
+        pixels = imageSize(url)
     }
 }

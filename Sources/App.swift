@@ -1,5 +1,5 @@
-// The app: the state the screens share (`Shelf`), the folder and its bookmark, and the top page.
-// The counterpart of src/main.rs of the GTK app
+// The app: the state the screens share (`Shelf`), the folder and its bookmark, the tabs, and
+// navigation. The counterpart of src/main.rs of the GTK app
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -16,6 +16,8 @@ struct IllustShelfApp: App {
     }
 }
 
+// MARK: - Shelf
+
 /// The library and how it is loading. One for the app
 @MainActor
 @Observable
@@ -29,6 +31,8 @@ final class Shelf {
     private(set) var generation = 0
     /// Shown in an alert
     var error: String?
+    /// Whether the folder picker is shown
+    var choosingFolder = false
 
     private var started = 0
     /// Names the folder of thumbnails, which is made new for each chosen folder
@@ -82,6 +86,22 @@ final class Shelf {
         generation += 1
     }
 
+    /// Re-reads the image's sidecar, before it is edited
+    func refresh(_ id: String) {
+        library.refresh(id)
+    }
+
+    /// Saves the image's metadata, if it changed. The tags in use follow
+    func save(_ id: String, _ meta: Meta) {
+        guard let item = library.get(id), item.editable else { return }
+        do {
+            try library.save(id, meta, now: timestamp())
+            tags = library.tags()
+        } catch {
+            self.error = "Could not save: \(error.localizedDescription)"
+        }
+    }
+
     /// Where the image's thumbnail is cached
     func thumb(_ id: String) -> URL {
         thumbs.appendingPathComponent(sha1(id) + ".jpg")
@@ -92,47 +112,39 @@ final class Shelf {
     }
 }
 
-/// The pages above the top page
-enum Page: Hashable {
-    /// A tag's gallery
-    case tag(String)
-    /// An image, in the gallery `ids` it was opened from
-    case image(ids: [String], index: Int)
-}
+// MARK: - Tabs
 
-/// Thumbnail sizes: the smallest width of a tile, in points
-enum Zoom: Double, CaseIterable {
-    case small = 80, medium = 120, large = 160
-
-    var name: String {
-        switch self {
-        case .small: "Small"
-        case .medium: "Medium"
-        case .large: "Large"
-        }
-    }
-}
-
+/// Library, Tags, and Search, as in Photos. Before a folder is chosen, an invitation to choose one
 struct RootView: View {
     @Environment(Shelf.self) private var shelf
-    @AppStorage("zoom") private var zoom = Zoom.medium.rawValue
-    @State private var path: [Page] = []
-    @State private var query = ""
-    @State private var choosing = false
 
     var body: some View {
-        NavigationStack(path: $path) {
-            content
-                .navigationTitle("Illust Shelf")
-                .toolbar { menu }
-                .navigationDestination(for: Page.self) { page in
-                    switch page {
-                    case .image(let ids, let index): Detail(ids: ids, index: index)
-                    case .tag: EmptyView()
+        @Bindable var shelf = shelf
+        Group {
+            if shelf.folder == nil {
+                ContentUnavailableView {
+                    Label("Illust Shelf", systemImage: "photo.on.rectangle.angled")
+                } description: {
+                    Text("Choose a folder of illustrations to browse and tag.")
+                } actions: {
+                    Button("Choose Folder…") { shelf.choosingFolder = true }
+                        .buttonStyle(.borderedProminent)
+                }
+            } else {
+                TabView {
+                    Tab("Library", systemImage: "photo.on.rectangle") {
+                        Stack { LibraryPage() }
+                    }
+                    Tab("Tags", systemImage: "tag") {
+                        Stack { TagsPage() }
+                    }
+                    Tab(role: .search) {
+                        Stack { SearchPage() }
                     }
                 }
+            }
         }
-        .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder]) { result in
+        .fileImporter(isPresented: $shelf.choosingFolder, allowedContentTypes: [.folder]) { result in
             switch result {
             case .success(let url): shelf.choose(url)
             case .failure(let error): shelf.error = error.localizedDescription
@@ -144,43 +156,106 @@ struct RootView: View {
             Text(shelf.error ?? "")
         }
     }
+}
 
-    @ViewBuilder
-    private var content: some View {
-        if shelf.library.isEmpty && shelf.loading {
-            ProgressView("Loading…")
-        } else if shelf.library.isEmpty {
-            ContentUnavailableView {
-                Label("No Illustrations", systemImage: "photo.on.rectangle.angled")
-            } description: {
-                Text("Choose a folder with images in it")
-            } actions: {
-                Button("Choose Folder…") { choosing = true }
-                    .buttonStyle(.borderedProminent)
+// MARK: - Navigation
+
+/// The pages a tab can show above its first
+enum Route: Hashable {
+    /// An image, in the gallery `ids` it was opened from
+    case image(ids: [String], id: String)
+    /// A tag's gallery
+    case tag(String)
+    /// All the tags of a namespace
+    case namespace(String)
+}
+
+/// A tab's pages. Each tab has its own
+@MainActor
+@Observable
+final class Router {
+    var path: [Route] = []
+
+    /// Whether the page on top is an image's
+    var showsImage: Bool {
+        if case .image = path.last { true } else { false }
+    }
+
+    func open(_ route: Route) {
+        path.append(route)
+    }
+
+    /// Opens the tag's gallery in place of the pages above the tab's first: of the image the tag
+    /// was chosen on
+    func open(tag: String) {
+        path = [.tag(tag)]
+    }
+}
+
+/// A tab's navigation stack. Gives its pages the `Router`, and the namespace in which a thumbnail
+/// grows into its image
+struct Stack<Root: View>: View {
+    @ViewBuilder let root: Root
+    @State private var router = Router()
+    @Namespace private var zoom
+
+    var body: some View {
+        NavigationStack(path: $router.path) {
+            root.navigationDestination(for: Route.self) { route in
+                switch route {
+                case .image(let ids, let id): Viewer(ids: ids, start: id)
+                case .tag(let tag): TagPage(tag: tag)
+                case .namespace(let namespace): NamespacePage(namespace: namespace)
+                }
             }
-        } else {
-            Gallery(tag: nil, query: query)
-                .searchable(text: $query)
-                .refreshable { await shelf.reload() }
+        }
+        // Hidden here, by what the stack shows, and not by the viewer: a bar that a page hides
+        // does not always come back when the page is left with the zoom transition
+        .toolbarVisibility(router.showsImage ? .hidden : .visible, for: .tabBar)
+        .environment(router)
+        .environment(\.zoomNamespace, zoom)
+    }
+}
+
+// MARK: - Settings
+
+/// Thumbnail sizes
+enum TileSize: String, CaseIterable {
+    case small, medium, large
+
+    var name: String {
+        switch self {
+        case .small: "Small"
+        case .medium: "Medium"
+        case .large: "Large"
         }
     }
 
-    private var menu: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Picker(selection: $zoom) {
-                    ForEach(Zoom.allCases, id: \.self) { Text($0.name).tag($0.rawValue) }
-                } label: {
-                    Label("Thumbnail Size", systemImage: "square.grid.2x2")
-                }
-                .pickerStyle(.menu)
-                Button("Choose Folder…", systemImage: "folder") { choosing = true }
+    /// The smallest width of a tile, in points
+    var minimum: CGFloat {
+        switch self {
+        case .small: 80
+        case .medium: 120
+        case .large: 180
+        }
+    }
+}
+
+/// The Library tab's menu: the thumbnail size and the folder
+struct LibraryMenu: View {
+    @Environment(Shelf.self) private var shelf
+    @AppStorage("tileSize") private var tileSize = TileSize.medium
+
+    var body: some View {
+        Menu("More", systemImage: "ellipsis") {
+            Picker("Thumbnail Size", selection: $tileSize) {
+                ForEach(TileSize.allCases, id: \.self) { Text($0.name) }
+            }
+            Section {
                 Button("Reload", systemImage: "arrow.clockwise") {
                     Task { await shelf.reload() }
                 }
-                .disabled(shelf.folder == nil)
-            } label: {
-                Label("Menu", systemImage: "ellipsis")
+                Button("Choose Folder…", systemImage: "folder") { shelf.choosingFolder = true }
             }
         }
     }

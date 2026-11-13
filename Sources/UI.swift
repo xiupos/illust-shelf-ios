@@ -4,10 +4,12 @@ import CryptoKit
 import ImageIO
 import SwiftUI
 
+// MARK: - Thumbnails
+
 /// A square tile with the image's thumbnail, made when it first comes into view
 struct Thumbnail: View {
-    let file: URL
-    let thumb: URL
+    let id: String
+    @Environment(Shelf.self) private var shelf
     @State private var image: UIImage?
 
     var body: some View {
@@ -21,8 +23,9 @@ struct Thumbnail: View {
                 }
             }
             .clipped()
-            .task(id: file) {
-                image = await Thumbnails.image(of: file, cachedAt: thumb)
+            .contentShape(.rect)
+            .task(id: id) {
+                image = await Thumbnails.image(of: shelf.library.file(id), cachedAt: shelf.thumb(id))
             }
     }
 }
@@ -85,6 +88,43 @@ enum Thumbnails {
     }
 }
 
+// MARK: - The zoom transition
+
+extension EnvironmentValues {
+    /// The namespace of a tab's zoom transitions: see `Stack`
+    @Entry var zoomNamespace: Namespace.ID?
+}
+
+extension View {
+    /// Marks a thumbnail as what the image's page grows out of, and shrinks back into
+    func zoomSource(_ id: String) -> some View {
+        modifier(ZoomTransition(id: id, isSource: true))
+    }
+
+    /// Makes a page open by growing out of the thumbnail of the image it shows
+    func zoomDestination(_ id: String) -> some View {
+        modifier(ZoomTransition(id: id, isSource: false))
+    }
+}
+
+private struct ZoomTransition: ViewModifier {
+    let id: String
+    let isSource: Bool
+    @Environment(\.zoomNamespace) private var namespace
+
+    func body(content: Content) -> some View {
+        if let namespace, isSource {
+            content.matchedTransitionSource(id: id, in: namespace)
+        } else if let namespace {
+            content.navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Images
+
 /// The image to show on its page: at most `maxPixels` on its long side, which is enough to zoom
 /// into and keeps the pages next to it in memory. EXIF orientation is applied
 func loadImage(_ file: URL, maxPixels: Int = 3072) async -> UIImage? {
@@ -99,8 +139,93 @@ func loadImage(_ file: URL, maxPixels: Int = 3072) async -> UIImage? {
     return UIImage(cgImage: image)
 }
 
+/// The image's size in pixels, as shown: turned by its EXIF orientation. Reads only the header
+func imageSize(_ file: URL) -> CGSize? {
+    guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+          let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = props[kCGImagePropertyPixelWidth] as? Int,
+          let height = props[kCGImagePropertyPixelHeight] as? Int
+    else { return nil }
+    let turned = ((props[kCGImagePropertyOrientation] as? Int) ?? 1) >= 5
+    return turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
+}
+
+/// Pages to swipe through, one for each ID, made as they are needed. A UIPageViewController: it
+/// keeps to a page when its size changes, which a paging ScrollView does not
+struct Pager<Page: View>: UIViewControllerRepresentable {
+    let ids: [String]
+    @Binding var current: String
+    @ViewBuilder let page: (String) -> Page
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pager = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal,
+                                         options: [.interPageSpacing: 20])
+        pager.dataSource = context.coordinator
+        pager.delegate = context.coordinator
+        pager.view.backgroundColor = .clear
+        pager.setViewControllers([context.coordinator.controller(for: current)], direction: .forward, animated: false)
+        return pager
+    }
+
+    func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: Pager
+        /// The ID each page shows
+        private let shown = NSMapTable<UIViewController, NSString>.weakToStrongObjects()
+
+        init(_ parent: Pager) {
+            self.parent = parent
+        }
+
+        func controller(for id: String) -> UIViewController {
+            let controller = UIHostingController(rootView: parent.page(id))
+            // The pages are full screen: they are told where the bars are
+            controller.safeAreaRegions = []
+            controller.view.backgroundColor = .clear
+            shown.setObject(id as NSString, forKey: controller)
+            return controller
+        }
+
+        private func id(of controller: UIViewController?) -> String? {
+            controller.flatMap { shown.object(forKey: $0) } as String?
+        }
+
+        private func neighbour(of controller: UIViewController, by step: Int) -> UIViewController? {
+            guard let id = id(of: controller), let index = parent.ids.firstIndex(of: id),
+                  parent.ids.indices.contains(index + step)
+            else { return nil }
+            return self.controller(for: parent.ids[index + step])
+        }
+
+        func pageViewController(_ pager: UIPageViewController,
+                                viewControllerBefore controller: UIViewController) -> UIViewController? {
+            neighbour(of: controller, by: -1)
+        }
+
+        func pageViewController(_ pager: UIPageViewController,
+                                viewControllerAfter controller: UIViewController) -> UIViewController? {
+            neighbour(of: controller, by: 1)
+        }
+
+        func pageViewController(_ pager: UIPageViewController, didFinishAnimating finished: Bool,
+                                previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+            if completed, let id = id(of: pager.viewControllers?.first) {
+                parent.current = id
+            }
+        }
+    }
+}
+
 /// An image that fits its space and zooms with a pinch or a double tap, in a UIScrollView: the
-/// pages around it scroll when it is not zoomed or is at its edge, as in Photos
+/// pages of the `Pager` around it scroll when it is not zoomed or is at its edge, as in Photos
 struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
     /// The image is fitted inside these, and can be scrolled out from under them when zoomed
