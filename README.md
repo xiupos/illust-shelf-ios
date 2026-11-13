@@ -1,4 +1,4 @@
-# Illust Shelf for iOS
+# illust-shelf-ios
 
 Browse and organize illustrations in a folder, with tags, sources, and notes. For iPhone and iPad.
 
