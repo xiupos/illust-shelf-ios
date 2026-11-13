@@ -243,13 +243,13 @@ private struct Info: View {
 
     /// A tag: its name, with its namespace after it. Tapped, it opens the tag's gallery
     private func tagRow(_ name: String) -> some View {
-        let tag = Tag(name: name, count: 0, cover: "")
+        let (namespace, short) = splitTag(name)
         return Button { router.open(tag: name) } label: {
             LinkRow(systemImage: "chevron.forward") {
                 LabeledContent {
-                    Text(verbatim: tag.namespace)
+                    Text(verbatim: namespace)
                 } label: {
-                    Text(verbatim: tag.short)
+                    Text(verbatim: short)
                 }
             }
         }

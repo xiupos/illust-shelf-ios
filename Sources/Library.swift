@@ -155,15 +155,14 @@ struct Tag: Identifiable, Equatable {
 
     var id: String { name }
 
-    /// The part before the first `:`, or "" if there is none
-    var namespace: String {
-        name.firstIndex(of: ":").map { String(name[..<$0]) } ?? ""
-    }
+    var namespace: String { splitTag(name).namespace }
+    var short: String { splitTag(name).short }
+}
 
-    /// The name without its namespace
-    var short: String {
-        name.firstIndex(of: ":").map { String(name[name.index(after: $0)...]) } ?? name
-    }
+/// A tag's namespace, the part before its first `:` ("" if there is none), and its name without it
+func splitTag(_ name: String) -> (namespace: String, short: String) {
+    guard let colon = name.firstIndex(of: ":") else { return ("", name) }
+    return (String(name[..<colon]), String(name[name.index(after: colon)...]))
 }
 
 struct TagSection: Identifiable {
@@ -321,36 +320,6 @@ struct Library {
     }
 }
 
-/// Copies an image into `folder` as `<UUIDv7>.<ext>`, so names sort by time added, with a sidecar
-/// that has only `added`. Returns the copy's ID
-func importImage(into folder: URL, from src: URL, now: String) throws -> String {
-    guard isImage(src.lastPathComponent) else { throw LibraryError.notImage }
-    return try add(into: folder, ext: src.pathExtension, now: now) { tmp in
-        try? FileManager.default.removeItem(at: tmp)
-        try FileManager.default.copyItem(at: src, to: tmp)
-        // A copy keeps the original's modification time, which would put an old image far down
-        // the galleries, not first as one just added
-        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: tmp.path)
-    }
-}
-
-/// Like `importImage`, for PNG data
-func importPNG(into folder: URL, _ png: Data, now: String) throws -> String {
-    try add(into: folder, ext: "png", now: now) { try png.write(to: $0) }
-}
-
-private func add(into folder: URL, ext: String, now: String, write: (URL) throws -> Void) throws -> String {
-    let name = "\(uuidV7()).\(ext)"
-    let dst = folder.appendingPathComponent(name)
-    let fm = FileManager.default
-    guard !fm.fileExists(atPath: dst.path), !fm.fileExists(atPath: sidecarURL(dst).path) else {
-        throw LibraryError.nameTaken
-    }
-    try writeAtomic(dst, write)
-    try writeJSON(sidecarURL(dst), Meta(added: now).json)
-    return name
-}
-
 /// `.json` appended to the whole name: replacing the extension would give `foo.png` and `foo.jpg`
 /// the same sidecar
 func sidecarURL(_ image: URL) -> URL {
@@ -392,22 +361,51 @@ func isImage(_ name: String) -> Bool {
     return imageExtensions.contains(name[name.index(after: dot)...].lowercased())
 }
 
-/// Has `write` fill a hidden temporary file next to `url` (`.<name>.tmp`, which scans skip), then
-/// renames it into place
-func writeAtomic(_ url: URL, _ write: (URL) throws -> Void) throws {
-    let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
-    do {
-        try write(tmp)
-        guard rename(tmp.path, url.path) == 0 else { throw LibraryError.renameFailed }
-    } catch {
-        try? FileManager.default.removeItem(at: tmp)
-        throw error
+enum LibraryError: LocalizedError {
+    case notFound, readOnly, notImage, nameTaken, renameFailed, badSidecar
+
+    var errorDescription: String? {
+        switch self {
+        case .notFound: "Image not found"
+        case .readOnly: "The sidecar is read-only"
+        case .notImage: "Not a supported image"
+        case .nameTaken: "The name is taken"
+        case .renameFailed: "Could not save the file"
+        case .badSidecar: "The sidecar is not valid"
+        }
     }
 }
 
-/// Indented JSON with a trailing newline
-func writeJSON(_ url: URL, _ value: JSON) throws {
-    try writeAtomic(url) { try Data((value.pretty() + "\n").utf8).write(to: $0) }
+// MARK: - Adding
+
+/// Copies an image into `folder` as `<UUIDv7>.<ext>`, so names sort by time added, with a sidecar
+/// that has only `added`. Returns the copy's ID
+func importImage(into folder: URL, from src: URL, now: String) throws -> String {
+    guard isImage(src.lastPathComponent) else { throw LibraryError.notImage }
+    return try add(into: folder, ext: src.pathExtension, now: now) { tmp in
+        try? FileManager.default.removeItem(at: tmp)
+        try FileManager.default.copyItem(at: src, to: tmp)
+        // A copy keeps the original's modification time, which would put an old image far down
+        // the galleries, not first as one just added
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: tmp.path)
+    }
+}
+
+/// Like `importImage`, for PNG data
+func importPNG(into folder: URL, _ png: Data, now: String) throws -> String {
+    try add(into: folder, ext: "png", now: now) { try png.write(to: $0) }
+}
+
+private func add(into folder: URL, ext: String, now: String, write: (URL) throws -> Void) throws -> String {
+    let name = "\(uuidV7()).\(ext)"
+    let dst = folder.appendingPathComponent(name)
+    let fm = FileManager.default
+    guard !fm.fileExists(atPath: dst.path), !fm.fileExists(atPath: sidecarURL(dst).path) else {
+        throw LibraryError.nameTaken
+    }
+    try writeAtomic(dst, write)
+    try writeJSON(sidecarURL(dst), Meta(added: now).json)
+    return name
 }
 
 /// The current local time in ISO 8601 with an offset, for `added`
@@ -432,19 +430,24 @@ func uuidV7(_ date: Date = Date()) -> String {
     return parts.joined(separator: "-")
 }
 
-enum LibraryError: LocalizedError {
-    case notFound, readOnly, notImage, nameTaken, renameFailed, badSidecar
+// MARK: - Writing
 
-    var errorDescription: String? {
-        switch self {
-        case .notFound: "Image not found"
-        case .readOnly: "The sidecar is read-only"
-        case .notImage: "Not a supported image"
-        case .nameTaken: "The name is taken"
-        case .renameFailed: "Could not save the file"
-        case .badSidecar: "The sidecar is not valid"
-        }
+/// Has `write` fill a hidden temporary file next to `url` (`.<name>.tmp`, which scans skip), then
+/// renames it into place
+func writeAtomic(_ url: URL, _ write: (URL) throws -> Void) throws {
+    let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
+    do {
+        try write(tmp)
+        guard rename(tmp.path, url.path) == 0 else { throw LibraryError.renameFailed }
+    } catch {
+        try? FileManager.default.removeItem(at: tmp)
+        throw error
     }
+}
+
+/// Indented JSON with a trailing newline
+func writeJSON(_ url: URL, _ value: JSON) throws {
+    try writeAtomic(url) { try Data((value.pretty() + "\n").utf8).write(to: $0) }
 }
 
 // MARK: - JSON
@@ -726,6 +729,7 @@ enum Tests {
         specCases(cases)
         jsonRoundTrip()
         readOnly()
+        tagRules()
         adding()
         removing()
         symlinks()
@@ -828,6 +832,13 @@ enum Tests {
         try! Data(#"{"v":1,"title":"now"}"#.utf8).write(to: sidecarURL(image))
         lib.refresh("a.png")
         check(lib.get("a.png")?.editable == true && lib.get("a.png")?.meta.title == "now", "refresh re-reads")
+    }
+
+    static func tagRules() {
+        var tags = ["a"]
+        check(pushUnique(&tags, " b ") && !pushUnique(&tags, "a ") && !pushUnique(&tags, " ") && tags == ["a", "b"],
+              "adding a tag: \(tags)")
+        check(splitTag("creator:Na:me") == ("creator", "Na:me") && splitTag("plain") == ("", "plain"), "namespaces")
     }
 
     static func adding() {

@@ -53,21 +53,11 @@ enum Thumbnails {
     }
 
     private static func make(_ file: URL, _ thumb: URL) -> UIImage? {
-        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0
-        else { return nil }
+        guard let pixels = imageSize(file), pixels.width > 0, pixels.height > 0 else { return nil }
         // The short side becomes at most `size`, for the square to be cut from it
-        let long = max(width, height)
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: min(long, size * long / min(width, height)),
-        ]
-        guard let scaled = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let long = Int(max(pixels.width, pixels.height))
+        let short = Int(min(pixels.width, pixels.height))
+        guard let scaled = decode(file, maxPixels: min(long, size * long / short)) else { return nil }
 
         // Center-cropped, onto white: JPEG has no alpha
         let side = min(scaled.width, scaled.height)
@@ -87,6 +77,11 @@ enum Thumbnails {
         }
         return square
     }
+}
+
+/// The SHA-1 of a text, in hex: names a thumbnail after an image's ID
+func sha1(_ text: String) -> String {
+    Insecure.SHA1.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
 // MARK: - The zoom transition
@@ -142,28 +137,15 @@ extension View {
 /// The image to show on its page: at most `maxPixels` on its long side, which is enough to zoom
 /// into and keeps the pages next to it in memory. EXIF orientation is applied
 func loadImage(_ file: URL, maxPixels: Int = 3072) async -> UIImage? {
-    guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
-    let options: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceShouldCacheImmediately: true,
-        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
-    ]
-    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-    return UIImage(cgImage: image)
+    decode(file, maxPixels: maxPixels).map { UIImage(cgImage: $0) }
 }
 
 /// The image as PNG data, turned by its EXIF orientation: for adding an image of a kind the
 /// library does not keep
 func pngData(_ file: URL) -> Data? {
-    guard let size = imageSize(file), let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
-    let options: [CFString: Any] = [
-        kCGImageSourceCreateThumbnailFromImageAlways: true,
-        kCGImageSourceCreateThumbnailWithTransform: true,
-        kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height)),
-    ]
     let data = NSMutableData()
-    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+    guard let size = imageSize(file),
+          let image = decode(file, maxPixels: Int(max(size.width, size.height))),
           let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
     else { return nil }
     CGImageDestinationAddImage(destination, image, nil)
@@ -180,6 +162,21 @@ func imageSize(_ file: URL) -> CGSize? {
     let turned = ((props[kCGImagePropertyOrientation] as? Int) ?? 1) >= 5
     return turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
 }
+
+/// The image's pixels, scaled down to at most `maxPixels` on the long side and turned by its EXIF
+/// orientation
+private func decode(_ file: URL, maxPixels: Int) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+}
+
+// MARK: - The pager
 
 /// Pages to swipe through, one for each ID, made as they are needed. A UIPageViewController: it
 /// keeps to a page when its size changes, which a paging ScrollView does not
@@ -259,6 +256,8 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
         }
     }
 }
+
+// MARK: - The zoomable image
 
 /// An image that fits its space and zooms with a pinch or a double tap, in a UIScrollView: the
 /// pages of the `Pager` around it scroll when it is not zoomed or is at its edge, as in Photos
@@ -376,9 +375,4 @@ struct ZoomableImage: UIViewRepresentable {
                                         bottom: fitInsets.bottom + dy, right: fitInsets.right + dx)
         }
     }
-}
-
-/// The SHA-1 of a text, in hex: names a thumbnail after an image's ID
-func sha1(_ text: String) -> String {
-    Insecure.SHA1.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
 }
