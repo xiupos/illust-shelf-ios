@@ -220,7 +220,7 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
 
         func controller(for id: String) -> UIViewController {
             let controller = UIHostingController(rootView: parent.page(id))
-            // The pages are full screen: they are told where the bars are
+            // The pages are full screen, under the bars
             controller.safeAreaRegions = []
             controller.view.backgroundColor = .clear
             shown.setObject(id as NSString, forKey: controller)
@@ -263,8 +263,6 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
 /// pages of the `Pager` around it scroll when it is not zoomed or is at its edge, as in Photos
 struct ZoomableImage: UIViewRepresentable {
     let image: UIImage
-    /// The image is fitted inside these, and can be scrolled out from under them when zoomed
-    let insets: UIEdgeInsets
     let onTap: () -> Void
 
     func makeUIView(context: Context) -> ZoomView {
@@ -281,7 +279,6 @@ struct ZoomableImage: UIViewRepresentable {
 
     func updateUIView(_ view: ZoomView, context: Context) {
         context.coordinator.onTap = onTap
-        view.fitInsets = insets
         if view.imageView.image !== image {
             view.imageView.image = image
             view.setZoomScale(1, animated: false)
@@ -327,9 +324,6 @@ struct ZoomableImage: UIViewRepresentable {
 
     final class ZoomView: UIScrollView {
         let imageView = UIImageView()
-        var fitInsets = UIEdgeInsets.zero {
-            didSet { if fitInsets != oldValue { setNeedsLayout() } }
-        }
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -347,14 +341,13 @@ struct ZoomableImage: UIViewRepresentable {
             fatalError("init(coder:) is not used")
         }
 
-        /// Not zoomed, the image fits inside `fitInsets`, still
+        /// Not zoomed, the image fits the view, still
         override func layoutSubviews() {
             super.layoutSubviews()
-            let area = bounds.inset(by: fitInsets)
             guard zoomScale == minimumZoomScale, let size = imageView.image?.size,
-                  size.width > 0, size.height > 0, area.width > 0, area.height > 0
+                  size.width > 0, size.height > 0, bounds.width > 0, bounds.height > 0
             else { return center() }
-            let fit = min(area.width / size.width, area.height / size.height)
+            let fit = min(bounds.width / size.width, bounds.height / size.height)
             let fitted = CGSize(width: size.width * fit, height: size.height * fit)
             if imageView.frame.size != fitted {
                 imageView.frame = CGRect(origin: .zero, size: fitted)
@@ -366,13 +359,11 @@ struct ZoomableImage: UIViewRepresentable {
             }
         }
 
-        /// Keeps an image smaller than the area inside `fitInsets` in its middle
+        /// Keeps an image smaller than the view in its middle
         func center() {
-            let area = bounds.inset(by: fitInsets)
-            let dx = max(0, (area.width - contentSize.width) / 2)
-            let dy = max(0, (area.height - contentSize.height) / 2)
-            contentInset = UIEdgeInsets(top: fitInsets.top + dy, left: fitInsets.left + dx,
-                                        bottom: fitInsets.bottom + dy, right: fitInsets.right + dx)
+            let dx = max(0, (bounds.width - contentSize.width) / 2)
+            let dy = max(0, (bounds.height - contentSize.height) / 2)
+            contentInset = UIEdgeInsets(top: dy, left: dx, bottom: dy, right: dx)
         }
     }
 }

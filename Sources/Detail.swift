@@ -12,7 +12,8 @@ struct Viewer: View {
     /// The gallery the image was opened from, less the images deleted here
     @State private var ids: [String]
     @State private var current: String
-    @State private var bars = Bars()
+    /// Whether the bars are hidden, leaving the image alone on the screen
+    @State private var hidden = false
     @State private var showsInfo = false
     @State private var deleting = false
     @Environment(Shelf.self) private var shelf
@@ -28,7 +29,7 @@ struct Viewer: View {
             pages
                 // No title: the image's is in Info. The bar is only its buttons
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarVisibility(bars.hidden ? .hidden : .visible, for: .navigationBar)
+                .toolbarVisibility(hidden ? .hidden : .visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Close", systemImage: "xmark") { dismiss() }
@@ -45,7 +46,7 @@ struct Viewer: View {
                 }
                 // Hiding the bars leaves the image alone on the screen: Info goes with them,
                 // and comes back with them
-                .inspector(isPresented: Binding { showsInfo && !bars.hidden } set: { showsInfo = $0 }) {
+                .inspector(isPresented: Binding { showsInfo && !hidden } set: { showsInfo = $0 }) {
                     // Made anew for each image: the old one saves as it goes
                     Info(id: current)
                         .id(current)
@@ -54,26 +55,19 @@ struct Viewer: View {
                         .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 }
         }
-        .statusBarHidden(bars.hidden)
+        .statusBarHidden(hidden)
         .zoomDestination(current)
     }
 
     private var pages: some View {
-        // The pages are full screen, so that the image can use it all while the bars are hidden.
-        // While they are shown, the image fits between them. The reader keeps to the safe area,
-        // so that it can tell where the bars are: one that ignores it is told of no insets
-        GeometryReader { geometry in
-            let safe = geometry.safeAreaInsets
-            let insets = UIEdgeInsets(top: safe.top, left: safe.leading, bottom: safe.bottom, right: safe.trailing)
-            Pager(ids: ids, current: $current) { id in
-                ImagePage(file: shelf.library.file(id), bars: bars)
-            }
-            .ignoresSafeArea()
-            .onChange(of: insets, initial: true) { _, insets in
-                bars.safeArea = insets
-            }
+        // The pages are as tall as the screen, under the bars as well: the bars have no title,
+        // and an image under them does not move when they hide. Not as wide: the Info column
+        // is in the safe area on the side, and the image is kept out from under it
+        Pager(ids: ids, current: $current) { id in
+            ImagePage(file: shelf.library.file(id), hidden: $hidden)
         }
-        .background(bars.hidden ? Color.black : Color(uiColor: .systemBackground))
+        .ignoresSafeArea(edges: .vertical)
+        .background(hidden ? Color.black : Color(uiColor: .systemBackground))
         // For a keyboard: the arrow keys page. Not seen, but not `hidden()`, which would take
         // the keys from them too
         .background {
@@ -107,31 +101,19 @@ struct Viewer: View {
     }
 }
 
-/// Whether the viewer's bars are hidden, and where they are. Shared with the pages, which the
-/// pager keeps outside the viewer's own view tree
-@MainActor
-@Observable
-private final class Bars {
-    var hidden = false
-    /// The viewer's safe area: the bars, while they are shown
-    var safeArea = UIEdgeInsets.zero
-
-    /// What the image is fitted inside
-    var insets: UIEdgeInsets { hidden ? .zero : safeArea }
-}
-
-/// One page: the image, decoded off the main thread, to zoom into
+/// One page: the image, decoded off the main thread, to zoom into. A tap hides the viewer's
+/// bars, or shows them
 private struct ImagePage: View {
     let file: URL
-    let bars: Bars
+    @Binding var hidden: Bool
     @State private var image: UIImage?
     @State private var failed = false
 
     var body: some View {
         Group {
             if let image {
-                ZoomableImage(image: image, insets: bars.insets) {
-                    withAnimation { bars.hidden.toggle() }
+                ZoomableImage(image: image) {
+                    withAnimation { hidden.toggle() }
                 }
             } else if failed {
                 ContentUnavailableView("Cannot Show the Image", systemImage: "exclamationmark.triangle")
