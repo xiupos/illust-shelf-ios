@@ -92,6 +92,7 @@ struct LibraryPage: View {
             }
         }
         .navigationTitle("Library")
+        .toolbarTitleDisplayMode(.inlineLarge)
         .refreshable { await shelf.reload() }
         .addsImages()
         .toolbar {
@@ -136,6 +137,7 @@ struct TagsPage: View {
             }
         }
         .navigationTitle("Tags")
+        .toolbarTitleDisplayMode(.inlineLarge)
     }
 }
 
@@ -247,6 +249,7 @@ struct SearchPage: View {
             }
         }
         .navigationTitle("Search")
+        .toolbarTitleDisplayMode(.inlineLarge)
         .searchable(text: $query, prompt: "Titles, Notes, and Tags")
         .textInputAutocapitalization(.never)
     }
