@@ -21,7 +21,7 @@ let package = Package(
             displayVersion: "0.1",
             bundleVersion: "1",
             appIcon: .asset("AppIcon"),
-            accentColor: .presetColor(.cyan),
+            accentColor: .presetColor(.blue),
             supportedDeviceFamilies: [
                 .pad,
                 .phone
@@ -32,7 +32,7 @@ let package = Package(
                 .landscapeLeft,
                 .portraitUpsideDown(.when(deviceFamilies: [.pad]))
             ],
-            appCategory: .photography
+            appCategory: .graphicsDesign
         )
     ],
     targets: [
