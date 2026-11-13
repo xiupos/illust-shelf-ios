@@ -1,12 +1,13 @@
 // One image: the viewer, which pages through the gallery the image was opened from, and the Info
-// panel, which edits its sidecar. The counterpart of src/detail.rs of the GTK app
+// panel, which edits its sidecar
 
 import SwiftUI
 
 // MARK: - Viewer
 
 /// The images of a gallery, one at a time, as Photos shows them: swipe for the next, pinch or
-/// double tap to zoom, tap to hide the bars
+/// double tap to zoom, tap to hide the buttons. Shown over the tab, with a stack of its own for
+/// its toolbar
 struct Viewer: View {
     /// The gallery the image was opened from, less the images deleted here
     @State private var ids: [String]
@@ -23,6 +24,41 @@ struct Viewer: View {
     }
 
     var body: some View {
+        NavigationStack {
+            pages
+                // No title: the image's is in Info. The bar is only its buttons
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarVisibility(bars.hidden ? .hidden : .visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close", systemImage: "xmark") { dismiss() }
+                            .keyboardShortcut(.cancelAction)
+                    }
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        ShareLink(item: shelf.library.file(current))
+                        Button("Delete", systemImage: "trash") { deleting = true }
+                            .keyboardShortcut(.delete)
+                            .confirmsDeleting($deleting, delete: delete)
+                        Button("Info", systemImage: "info.circle") { showsInfo.toggle() }
+                            .keyboardShortcut("i")
+                    }
+                }
+                // Hiding the bars leaves the image alone on the screen: Info goes with them,
+                // and comes back with them
+                .inspector(isPresented: Binding { showsInfo && !bars.hidden } set: { showsInfo = $0 }) {
+                    // Made anew for each image: the old one saves as it goes
+                    Info(id: current)
+                        .id(current)
+                        .inspectorColumnWidth(min: 280, ideal: 340)
+                        .presentationDetents([.medium, .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+                }
+        }
+        .statusBarHidden(bars.hidden)
+        .zoomDestination(current)
+    }
+
+    private var pages: some View {
         // The pages are full screen, so that the image can use it all while the bars are hidden.
         // While they are shown, the image fits between them. The reader keeps to the safe area,
         // so that it can tell where the bars are: one that ignores it is told of no insets
@@ -38,32 +74,27 @@ struct Viewer: View {
             }
         }
         .background(bars.hidden ? Color.black : Color(uiColor: .systemBackground))
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarVisibility(bars.hidden ? .hidden : .visible, for: .navigationBar)
-        .statusBarHidden(bars.hidden)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                ShareLink(item: shelf.library.file(current))
-                Button("Delete", systemImage: "trash") { deleting = true }
-                    .confirmsDeleting($deleting, delete: delete)
-                Button("Info", systemImage: "info.circle") { showsInfo.toggle() }
+        // For a keyboard: the arrow keys page. Not seen, but not `hidden()`, which would take
+        // the keys from them too
+        .background {
+            Group {
+                Button("Previous") { step(-1) }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                Button("Next") { step(1) }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
             }
+            .opacity(0)
+            .accessibilityHidden(true)
         }
-        // Hiding the bars leaves the image alone on the screen: Info goes with them, and comes
-        // back with them
-        .inspector(isPresented: Binding { showsInfo && !bars.hidden } set: { showsInfo = $0 }) {
-            // Made anew for each image: the old one saves as it goes
-            Info(id: current)
-                .id(current)
-                .inspectorColumnWidth(min: 280, ideal: 340)
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-        }
-        .zoomDestination(current)
     }
 
-    /// Deletes the image shown, and shows the next, or the one before the last. Goes back after
+    /// Shows the image `by` places further on in the gallery, if there is one
+    private func step(_ by: Int) {
+        guard let index = ids.firstIndex(of: current), ids.indices.contains(index + by) else { return }
+        current = ids[index + by]
+    }
+
+    /// Deletes the image shown, and shows the next, or the one before the last. Closes after
     /// the only one
     private func delete() {
         guard let index = ids.firstIndex(of: current), shelf.remove(current) else { return }
@@ -73,12 +104,6 @@ struct Viewer: View {
         } else {
             current = ids[min(index, ids.count - 1)]
         }
-    }
-
-    /// The image's title, or its file name
-    private var title: String {
-        let title = shelf.library.get(current)?.meta.title ?? ""
-        return title.isEmpty ? String(current.split(separator: "/").last ?? "") : title
     }
 }
 

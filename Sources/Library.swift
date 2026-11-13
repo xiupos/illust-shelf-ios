@@ -1,6 +1,6 @@
 // The images of a folder and their sidecars. Foundation only, so that it also builds on Linux,
-// where the tests at the end of this file check it against the shared spec. A port of
-// src/library.rs of the GTK app (https://github.com/xiupos/illust-shelf-gtk), in the same order.
+// where the tests at the end of this file check it against the cases that every Illust Shelf
+// app shares (spec/cases.json).
 
 import Foundation
 
@@ -128,7 +128,7 @@ struct Item {
     }
 }
 
-/// File name order, then ID order, by bytes as Rust compares them
+/// File name order, then ID order, by bytes
 private func byName(_ a: Item, _ b: Item) -> Bool {
     a.name == b.name ? idPrecedes(a.id, b.id) : bytesPrecede(a.name, b.name)
 }
@@ -137,7 +137,8 @@ private func bytesPrecede(_ a: some StringProtocol, _ b: some StringProtocol) ->
     a.utf8.lexicographicallyPrecedes(b.utf8)
 }
 
-/// IDs are ordered as Rust orders paths: part by part, each by its bytes
+/// IDs are ordered part by part, each by its bytes, not as whole strings: `a/b` is before `a.b`.
+/// Every Illust Shelf app must order them alike, for galleries to be in the same order
 func idPrecedes(_ a: String, _ b: String) -> Bool {
     a.split(separator: "/").lexicographicallyPrecedes(b.split(separator: "/"), by: bytesPrecede)
 }
@@ -685,7 +686,7 @@ private struct JSONParser {
 
 // Linux only: the app never builds this. Run with
 //   swiftc -parse-as-library Sources/Library.swift -o /tmp/illust-shelf-spec && /tmp/illust-shelf-spec
-// It takes the path of the GTK app's spec/cases.json, by default ~/Projects/illust-viewer's
+// It runs spec/cases.json of this project, or the file whose path it is given
 #if os(Linux)
 @main
 enum Tests {
@@ -719,7 +720,8 @@ enum Tests {
 
     static func main() throws {
         let path = CommandLine.arguments.dropFirst().first
-            ?? FileManager.default.homeDirectoryForCurrentUser.path + "/Projects/illust-viewer/spec/cases.json"
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("spec/cases.json").path
         let cases = try JSON(parsing: Data(contentsOf: URL(fileURLWithPath: path)))
         specCases(cases)
         jsonRoundTrip()
@@ -731,7 +733,7 @@ enum Tests {
         exit(failures == 0 ? 0 : 1)
     }
 
-    /// The cases every implementation shares, run as library.rs's spec_cases runs them
+    /// The cases every Illust Shelf app shares, run as the spec says (SPEC.md, "Test cases")
     static func specCases(_ cases: JSON) {
         let now = cases["now"]!.string!
 

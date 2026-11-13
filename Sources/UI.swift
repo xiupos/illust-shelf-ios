@@ -1,4 +1,4 @@
-// Shared views and the thumbnails. The counterpart of src/ui.rs of the GTK app
+// Views that the pages share: thumbnails, the zoom transition, the pager, the zoomable image
 
 import CryptoKit
 import ImageIO

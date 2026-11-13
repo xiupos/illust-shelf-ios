@@ -1,8 +1,10 @@
 # Implementation Notes
 
-Illust Shelf for iOS and iPadOS: a port of the GTK app ([illust-shelf-gtk](https://github.com/xiupos/illust-shelf-gtk), checked out at `~/Projects/illust-viewer`). The behaviour every Illust Shelf app shares is in that repository's `spec/SPEC.md`, with test cases in `spec/cases.json`. Read them there; they are not copied here.
+Illust Shelf for iOS and iPadOS: browse and organize illustrations in a folder, with metadata in a JSON file next to each image ([illust-sidecar](https://github.com/xiupos/illust-sidecar)).
 
-**Keep it small enough to read.** Five source files that match the GTK app's five, no subfolders, no Docs folder. A new feature goes into the file whose GTK counterpart has it.
+It is one of the Illust Shelf apps, each an implementation of its own for its platform. They share what they do, not code or design: the behaviour is specified in `spec/SPEC.md`, with test cases in `spec/cases.json`. The spec is kept in the repository of the app for GNOME, [illust-shelf-gtk](https://github.com/xiupos/illust-shelf-gtk) (checked out at `~/Projects/illust-shelf-gtk`): read `SPEC.md` there. `spec/cases.json` here is a copy of the one there, so that the tests need nothing outside this project. When it changes there, copy it again.
+
+**Keep it small enough to read.** Five source files, no subfolders, no Docs folder. A new feature goes into the file that has its kind.
 
 ## Environment
 
@@ -13,45 +15,46 @@ Illust Shelf for iOS and iPadOS: a port of the GTK app ([illust-shelf-gtk](https
 
 ## Layout
 
-| File | GTK | Contents |
-|---|---|---|
-| `Sources/App.swift` | `main.rs` | `@main`, `Shelf` (the library, loading, the folder's bookmark), the tabs, navigation (`Route`, `Router`, `Stack`), settings |
-| `Sources/Browse.swift` | `browse.rs` | `Gallery`, and the pages of the Library, Tags, and Search tabs |
-| `Sources/Detail.swift` | `detail.rs` | `Viewer`: one image at a time. `Info`: the editor of its sidecar |
-| `Sources/Library.swift` | `library.rs` | Foundation only: scanning, sidecars, filtering, tags, saving, adding, removing, JSON. Has the tests |
-| `Sources/UI.swift` | `ui.rs` | Thumbnails, the zoom transition, the zoomable image |
+| File | Contents |
+|---|---|
+| `Sources/App.swift` | `@main`, `Shelf` (the library, loading, the folder's bookmark, adding and removing), the tabs, navigation (`Route`, `Router`, `Stack`), settings |
+| `Sources/Browse.swift` | `Gallery`, and the pages of the Library, Tags, and Search tabs |
+| `Sources/Detail.swift` | `Viewer`: one image at a time. `Info`: the editor of its sidecar |
+| `Sources/Library.swift` | Foundation only, and all of the shared behaviour: scanning, sidecars, filtering, tags, saving, adding, removing, JSON. Has the tests |
+| `Sources/UI.swift` | Thumbnails, the zoom transition, the pager, the zoomable image |
+| `spec/cases.json` | The shared test cases |
 
 ## Testing
 
-`Library.swift` builds on Linux. Its tests, at the end of the file under `#if os(Linux)`, run the shared `cases.json` as the GTK app's `spec_cases` does, and a few more:
+`Library.swift` builds on Linux. Its tests, at the end of the file under `#if os(Linux)`, run the shared `cases.json` as the spec says to, and a few more:
 
 ```bash
 swiftc -parse-as-library Sources/Library.swift -o /tmp/illust-shelf-spec && /tmp/illust-shelf-spec
 ```
 
-The path of `cases.json` may be given as an argument; the default is `~/Projects/illust-viewer/spec/cases.json`. Everything else needs the iPad: say what has not been checked there.
+They read `spec/cases.json` of this project, found from the source file's own path, so they run from any folder. Another file's path may be given as an argument, for example that of the spec's own, to check that the copy is current. Everything else needs the iPad: say what has not been checked there.
 
 ## Library
 
 - **JSON is parsed by hand.** `JSONSerialization` turns `1.0` into `1`, which the spec makes read-only, loses key order, and behaves differently on Linux. Numbers keep their text; duplicate keys make a sidecar read-only.
-- **IDs** are paths relative to the folder, compared part by part by their bytes, as Rust compares paths. The folder's own path changes on iOS, so nothing stores it; the folder is kept as a bookmark.
+- **IDs** are paths relative to the folder, compared part by part by their bytes, not as whole strings, so that all the apps order them alike. The folder's own path changes on iOS, so nothing stores it; the folder is kept as a bookmark.
 - **Scanning** follows symlinks, walks a folder reached twice once, and counts a file reached twice once.
-- **Thumbnails** are not made by a load, unlike the GTK app's: the grid makes them as tiles come into view (SPEC, "Left to the implementation"). They are 512 px center-cropped JPEGs in `Caches/thumbs/<cacheID>/`, named by the SHA-1 of the ID. The cache folder is made new for each chosen folder. EXIF orientation is applied.
-- **Adding** sets the copy's modification time to now. `FileManager.copyItem` keeps the original's, unlike Rust's `fs::copy`, and galleries are ordered by it.
+- **Thumbnails** are not made by a load: the grid makes them as tiles come into view (SPEC, "Left to the implementation"). They are 512 px center-cropped JPEGs in `Caches/thumbs/<cacheID>/`, named by the SHA-1 of the ID. The cache folder is made new for each chosen folder. EXIF orientation is applied.
+- **Adding** sets the copy's modification time to now. `FileManager.copyItem` keeps the original's, and galleries are ordered by it.
 - **Removing** deletes the image and its sidecar: there is no trash for the user's folders on iOS.
 - `timestamp()` is here, not in `UI.swift`, so that the tests can check it.
 
 ## UI
 
-- **iOS first, not the GTK app's look.** The GTK app and the spec decide what the app does, not how it looks. The screens follow Photos: three tabs, a grid that a thumbnail grows out of into its image, an Info panel. Native SwiftUI only: no custom chrome.
-- **Tabs.** Library (every image, titled by the folder's name), Tags (a shelf of tags for each namespace), and Search (the tags and the images that match). The spec's "top screen with a search for each" is these three. A section's heading opens all the tags of its namespace, which is what the spec's search for `<namespace>:` finds.
-- **Navigation.** Each tab is a `Stack` with its own `Router`. Pages are `Route` values; only `Stack` turns them into views. Opening a tag from an image replaces the pages above the tab's first with the tag's gallery (`Router.open(tag:)`).
+- **An iOS app.** The spec decides what the app does, and leaves how it looks to the platform. The screens follow Photos: three tabs, a grid that a thumbnail grows out of into its image, an Info panel. Native SwiftUI only: no custom chrome.
+- **Tabs.** Library (every image), Tags (a shelf of tags for each namespace), and Search (the tags and the images that match). The spec's "top screen with a search for each" is these three. A section's heading opens all the tags of its namespace, which is what the spec's search for `<namespace>:` finds.
+- **Navigation.** Each tab is a `Stack` with its own `Router`. Pages are `Route` values; only `Stack` turns them into views. The viewer is not a page: it is a full screen cover over the tab (`Router.viewing`), as a photo is in Photos. As a page it had to hide the tab bar, which on an iPad is above the navigation bar: the bars, and the image fitted between them, moved a moment after the page appeared, and the tab bar did not always come back. Opening a tag from an image closes the viewer and replaces the pages above the tab's first with the tag's gallery (`Router.open(tag:)`).
 - **Galleries are not refreshed** by edits: `Gallery` makes its list again only for a search, a reload (`Shelf.generation`), or another tag.
-- **The viewer** pages with a `UIPageViewController` (`Pager`), not a SwiftUI `ScrollView` or `TabView`: both were tried, and both stop between two pages, the scroll view when the window or the Info column changes its size, the tab view when it ignores the safe area. The pages are hosted outside the viewer's view tree, so they share `Bars` with it instead of the environment. While the bars show, the image is fitted between them: the `GeometryReader` that measures them must keep to the safe area, and only the pager inside it ignores it. Zooming is a `UIScrollView` (`ZoomableImage`), so that paging takes over at the image's edge.
-- **The tab bar** is hidden by `Stack`, from what its path shows, not by the viewer: a bar that a page hides does not always come back when the page is left with the zoom transition.
+- **The viewer** has a stack of its own, for its toolbar: Close, Share, Delete, Info. It has no title; the image's title is in Info. It pages with a `UIPageViewController` (`Pager`), not a SwiftUI `ScrollView` or `TabView`: both were tried, and both stop between two pages, the scroll view when the window or the Info column changes its size, the tab view when it ignores the safe area. The pages are hosted outside the viewer's view tree, so they share `Bars` with it instead of the environment. While the bars show, the image is fitted between them: the `GeometryReader` that measures them must keep to the safe area, and only the pager inside it ignores it. Zooming is a `UIScrollView` (`ZoomableImage`), so that paging takes over at the image's edge.
 - **Info** is an `.inspector`: a column on an iPad, a sheet on an iPhone. It hides with the bars, and comes back with them. It is made anew for each image, reads the sidecar again when it appears, and saves as edits are made. Tags and URLs are removed by swiping, as list rows are.
 - **Adding.** Every way in (the photo library, files, the clipboard, a drop) ends in `Shelf.add(files:)`, with files in a temporary folder where the source has none. A file with one of the library's extensions is copied as it is; anything else that decodes, such as a HEIC photo, is added as a PNG, as the spec has image data without a file. The pickers are presented from the page, not from the menu in its toolbar, where they do not appear.
 - **Deleting** asks first, from the button or the thumbnail it was chosen on. The viewer then shows the next image; `Pager` replaces its pages when `current` changes from outside.
+- **Keys**, for an iPad with a keyboard: ⌘R reloads, ⌘O chooses a folder, ⌘V pastes; in the viewer, ← and → page, ⌘I shows Info, ⌘⌫ deletes, Esc closes.
 - **Input methods.** Never change the text of a field while the user types in it. Tag suggestions are rows to tap.
 
 ## Milestones
@@ -63,4 +66,4 @@ The path of `cases.json` may be given as an argument; the default is `~/Projects
 - [x] M4: Editing: Info panel, saving, suggestions, read-only sidecars
 - [x] M5: Tabs, Tags, tag galleries, Search, the zoom transition
 - [x] M6: Adding (Photos, Files, paste, drop) and removing images
-- [ ] M7: Keyboard shortcuts, About, Dynamic Type and dark mode
+- [x] M7: Keyboard shortcuts, About, Dynamic Type and dark mode

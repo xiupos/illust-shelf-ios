@@ -1,5 +1,5 @@
 // The app: the state the screens share (`Shelf`), the folder and its bookmark, the tabs, and
-// navigation. The counterpart of src/main.rs of the GTK app
+// navigation
 
 import PhotosUI
 import SwiftUI
@@ -34,6 +34,7 @@ final class Shelf {
     var error: String?
     /// Whether the folder picker is shown
     var choosingFolder = false
+    var showingAbout = false
 
     private var started = 0
     /// Names the folder of thumbnails, which is made new for each chosen folder
@@ -243,6 +244,7 @@ struct RootView: View {
             case .failure(let error): shelf.error = error.localizedDescription
             }
         }
+        .sheet(isPresented: $shelf.showingAbout) { About() }
         .alert("Error", isPresented: Binding { shelf.error != nil } set: { if !$0 { shelf.error = nil } }) {
             Button("OK") {}
         } message: {
@@ -255,38 +257,40 @@ struct RootView: View {
 
 /// The pages a tab can show above its first
 enum Route: Hashable {
-    /// An image, in the gallery `ids` it was opened from
-    case image(ids: [String], id: String)
     /// A tag's gallery
     case tag(String)
     /// All the tags of a namespace
     case namespace(String)
 }
 
-/// A tab's pages. Each tab has its own
+/// An image to look at, and the gallery it was opened from
+struct Viewing: Identifiable {
+    let ids: [String]
+    let id: String
+}
+
+/// A tab's pages, and the image shown over them. Each tab has its own
 @MainActor
 @Observable
 final class Router {
     var path: [Route] = []
+    var viewing: Viewing?
 
-    /// Whether the page on top is an image's
-    var showsImage: Bool {
-        if case .image = path.last { true } else { false }
+    /// Shows the image, to page through `ids` from
+    func view(_ id: String, in ids: [String]) {
+        viewing = Viewing(ids: ids, id: id)
     }
 
-    func open(_ route: Route) {
-        path.append(route)
-    }
-
-    /// Opens the tag's gallery in place of the pages above the tab's first: of the image the tag
-    /// was chosen on
+    /// Opens the tag's gallery in place of the image the tag was chosen on, and of the pages
+    /// above the tab's first
     func open(tag: String) {
+        viewing = nil
         path = [.tag(tag)]
     }
 }
 
-/// A tab's navigation stack. Gives its pages the `Router`, and the namespace in which a thumbnail
-/// grows into its image
+/// A tab's navigation stack, with the viewer over it. Gives its pages the `Router`, and the
+/// namespace in which a thumbnail grows into its image
 struct Stack<Root: View>: View {
     @ViewBuilder let root: Root
     @State private var router = Router()
@@ -296,15 +300,16 @@ struct Stack<Root: View>: View {
         NavigationStack(path: $router.path) {
             root.navigationDestination(for: Route.self) { route in
                 switch route {
-                case .image(let ids, let id): Viewer(ids: ids, start: id)
                 case .tag(let tag): TagPage(tag: tag)
                 case .namespace(let namespace): NamespacePage(namespace: namespace)
                 }
             }
         }
-        // Hidden here, by what the stack shows, and not by the viewer: a bar that a page hides
-        // does not always come back when the page is left with the zoom transition
-        .toolbarVisibility(router.showsImage ? .hidden : .visible, for: .tabBar)
+        // Over the whole tab, bars and all, as Photos shows a photo: not a page of the stack,
+        // which would have to hide the tab bar, and settles a moment after it appears
+        .fullScreenCover(item: $router.viewing) { viewing in
+            Viewer(ids: viewing.ids, start: viewing.id)
+        }
         .environment(router)
         .environment(\.zoomNamespace, zoom)
     }
@@ -348,9 +353,41 @@ struct LibraryMenu: View {
                 Button("Reload", systemImage: "arrow.clockwise") {
                     Task { await shelf.reload() }
                 }
+                .keyboardShortcut("r")
                 Button("Choose Folder…", systemImage: "folder") { shelf.choosingFolder = true }
+                    .keyboardShortcut("o")
+            }
+            Button("About Illust Shelf", systemImage: "info.circle") { shelf.showingAbout = true }
+        }
+    }
+}
+
+/// What the app is, and its version
+private struct About: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+                    LabeledContent("License", value: "MIT")
+                } footer: {
+                    Text("Browse and organize illustrations with tags. The tags, sources, and notes are kept in a JSON file next to each image.")
+                }
+                Section {
+                    Link("The illust-sidecar Format", destination: URL(string: "https://github.com/xiupos/illust-sidecar")!)
+                }
+            }
+            .navigationTitle("Illust Shelf")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
         }
+        .presentationDetents([.medium])
     }
 }
 
@@ -378,6 +415,7 @@ private struct AddsImages: ViewModifier {
                         Button("Photo Library", systemImage: "photo.on.rectangle") { pickingPhotos = true }
                         Button("Files", systemImage: "folder") { pickingFiles = true }
                         Button("Paste", systemImage: "doc.on.clipboard", action: paste)
+                            .keyboardShortcut("v")
                     }
                 }
             }

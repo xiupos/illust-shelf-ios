@@ -1,5 +1,4 @@
-// The pages that list things: galleries of images, and tags. The counterpart of src/browse.rs
-// of the GTK app
+// The pages that list things: galleries of images, and tags
 
 import SwiftUI
 
@@ -30,7 +29,7 @@ struct Gallery<Header: View>: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: tileSize.minimum), spacing: 2)], spacing: 2) {
                 ForEach(shown, id: \.self) { id in
                     Button {
-                        router.open(.image(ids: shown, id: id))
+                        router.view(id, in: shown)
                     } label: {
                         Thumbnail(id: id)
                     }
@@ -72,7 +71,7 @@ extension Gallery where Header == EmptyView {
 
 // MARK: - Library
 
-/// The Library tab: every image, newest first, under the folder's name
+/// The Library tab: every image, newest first
 struct LibraryPage: View {
     @Environment(Shelf.self) private var shelf
 
@@ -92,8 +91,7 @@ struct LibraryPage: View {
                 }
             }
         }
-        .navigationTitle(shelf.folder?.lastPathComponent ?? "Library")
-        .toolbarVisibility(.visible, for: .navigationBar)
+        .navigationTitle("Library")
         .refreshable { await shelf.reload() }
         .addsImages()
         .toolbar {
@@ -175,7 +173,6 @@ struct TagPage: View {
     var body: some View {
         Gallery(tag: tag, query: query)
             .navigationTitle(tag)
-            .toolbarVisibility(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $query)
     }
