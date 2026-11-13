@@ -19,6 +19,8 @@ struct Gallery<Header: View>: View {
     @Environment(Router.self) private var router
     @AppStorage("tileSize") private var tileSize = TileSize.medium
     @State private var ids: [String] = []
+    /// The image the user is asked about deleting
+    @State private var deleting: String?
 
     var body: some View {
         // Images removed since the list was made are left out
@@ -34,6 +36,13 @@ struct Gallery<Header: View>: View {
                     }
                     .buttonStyle(.plain)
                     .zoomSource(id)
+                    .contextMenu {
+                        ShareLink(item: shelf.library.file(id))
+                        Button("Delete", systemImage: "trash", role: .destructive) { deleting = id }
+                    }
+                    .confirmsDeleting(Binding { deleting == id } set: { if !$0 { deleting = nil } }) {
+                        shelf.remove(id)
+                    }
                 }
             }
         }
@@ -86,6 +95,7 @@ struct LibraryPage: View {
         .navigationTitle(shelf.folder?.lastPathComponent ?? "Library")
         .toolbarVisibility(.visible, for: .navigationBar)
         .refreshable { await shelf.reload() }
+        .addsImages()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { LibraryMenu() }
         }

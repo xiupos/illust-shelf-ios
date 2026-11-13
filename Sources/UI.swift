@@ -3,6 +3,7 @@
 import CryptoKit
 import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Thumbnails
 
@@ -123,6 +124,19 @@ private struct ZoomTransition: ViewModifier {
     }
 }
 
+// MARK: - Deleting
+
+extension View {
+    /// Asks before `delete` is done, from the view that this is on
+    func confirmsDeleting(_ isPresented: Binding<Bool>, delete: @escaping () -> Void) -> some View {
+        confirmationDialog("Delete Image", isPresented: isPresented) {
+            Button("Delete Image", role: .destructive, action: delete)
+        } message: {
+            Text("The image and its title, tags, and note will be deleted from the folder. This can't be undone.")
+        }
+    }
+}
+
 // MARK: - Images
 
 /// The image to show on its page: at most `maxPixels` on its long side, which is enough to zoom
@@ -137,6 +151,23 @@ func loadImage(_ file: URL, maxPixels: Int = 3072) async -> UIImage? {
     ]
     guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
     return UIImage(cgImage: image)
+}
+
+/// The image as PNG data, turned by its EXIF orientation: for adding an image of a kind the
+/// library does not keep
+func pngData(_ file: URL) -> Data? {
+    guard let size = imageSize(file), let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height)),
+    ]
+    let data = NSMutableData()
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
+          let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
+    else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination) ? data as Data : nil
 }
 
 /// The image's size in pixels, as shown: turned by its EXIF orientation. Reads only the header
@@ -169,6 +200,11 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
 
     func updateUIViewController(_ pager: UIPageViewController, context: Context) {
         context.coordinator.parent = self
+        // `current` was set from outside, not by a swipe: its page takes the place of the one
+        // shown, and of those kept ready next to it
+        if context.coordinator.id(of: pager.viewControllers?.first) != current {
+            pager.setViewControllers([context.coordinator.controller(for: current)], direction: .forward, animated: false)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -194,7 +230,7 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
             return controller
         }
 
-        private func id(of controller: UIViewController?) -> String? {
+        func id(of controller: UIViewController?) -> String? {
             controller.flatMap { shown.object(forKey: $0) } as String?
         }
 

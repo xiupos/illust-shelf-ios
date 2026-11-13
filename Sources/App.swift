@@ -1,6 +1,7 @@
 // The app: the state the screens share (`Shelf`), the folder and its bookmark, the tabs, and
 // navigation. The counterpart of src/main.rs of the GTK app
 
+import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -102,6 +103,78 @@ final class Shelf {
         }
     }
 
+    /// Copies the images into the folder, then loads it again. A file of another kind is added
+    /// as a PNG if it can be decoded, as image data without a file is. `failed` counts the
+    /// images that were lost before this
+    func add(files: [URL], failed: Int = 0) async {
+        guard let folder else { return }
+        let now = timestamp()
+        let refused = await Task.detached {
+            files.filter { file -> Bool in
+                let scoped = file.startAccessingSecurityScopedResource()
+                defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+                do {
+                    if isImage(file.lastPathComponent) {
+                        _ = try importImage(into: folder, from: file, now: now)
+                    } else if let png = pngData(file) {
+                        _ = try importPNG(into: folder, png, now: now)
+                    } else {
+                        return true
+                    }
+                    return false
+                } catch {
+                    return true
+                }
+            }.count
+        }.value
+        switch failed + refused {
+        case 0: break
+        case 1: error = "An image could not be added."
+        case let count: error = "\(count) images could not be added."
+        }
+        await reload()
+    }
+
+    /// Adds images picked from the photo library
+    func add(photos: [PhotosPickerItem]) async {
+        let folder = temporaryFolder()
+        var files: [URL] = []
+        for photo in photos {
+            guard let data = try? await photo.loadTransferable(type: Data.self) else { continue }
+            let type = photo.supportedContentTypes.first?.preferredFilenameExtension ?? "image"
+            let file = folder.appendingPathComponent("\(files.count).\(type)")
+            if (try? data.write(to: file)) != nil { files.append(file) }
+        }
+        await add(files: files, failed: photos.count - files.count)
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    /// Adds dropped or pasted images
+    func add(providers: [NSItemProvider]) {
+        Task {
+            let folder = temporaryFolder()
+            var files: [URL] = []
+            for provider in providers {
+                if let file = await copy(of: provider, into: folder) { files.append(file) }
+            }
+            await add(files: files, failed: providers.count - files.count)
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
+    /// Deletes the image and its sidecar. false if that fails
+    @discardableResult
+    func remove(_ id: String) -> Bool {
+        do {
+            try library.remove(id)
+            tags = library.tags()
+            return true
+        } catch {
+            self.error = "Could not delete: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     /// Where the image's thumbnail is cached
     func thumb(_ id: String) -> URL {
         thumbs.appendingPathComponent(sha1(id) + ".jpg")
@@ -109,6 +182,26 @@ final class Shelf {
 
     private var thumbs: URL {
         URL.cachesDirectory.appendingPathComponent("thumbs/\(cacheID)")
+    }
+}
+
+/// A new folder for the files of images on their way into the library
+private func temporaryFolder() -> URL {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("adding-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    return folder
+}
+
+/// The provider's image as a file in `folder`, with the extension of its kind
+private func copy(of provider: NSItemProvider, into folder: URL) async -> URL? {
+    await withCheckedContinuation { continuation in
+        // The file is gone when this returns, so it is copied here
+        _ = provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { file, _ in
+            guard let file else { return continuation.resume(returning: nil) }
+            let copy = folder.appendingPathComponent("\(UUID().uuidString).\(file.pathExtension)")
+            let copied = (try? FileManager.default.copyItem(at: file, to: copy)) != nil
+            continuation.resume(returning: copied ? copy : nil)
+        }
     }
 }
 
@@ -257,6 +350,61 @@ struct LibraryMenu: View {
                 }
                 Button("Choose Folder…", systemImage: "folder") { shelf.choosingFolder = true }
             }
+        }
+    }
+}
+
+// MARK: - Adding images
+
+extension View {
+    /// Gives a page the ways to add images: a + menu in its toolbar (the photo library, files,
+    /// the clipboard), and dropping them on it
+    func addsImages() -> some View {
+        modifier(AddsImages())
+    }
+}
+
+private struct AddsImages: ViewModifier {
+    @Environment(Shelf.self) private var shelf
+    @State private var pickingPhotos = false
+    @State private var pickingFiles = false
+    @State private var photos: [PhotosPickerItem] = []
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("Add", systemImage: "plus") {
+                        Button("Photo Library", systemImage: "photo.on.rectangle") { pickingPhotos = true }
+                        Button("Files", systemImage: "folder") { pickingFiles = true }
+                        Button("Paste", systemImage: "doc.on.clipboard", action: paste)
+                    }
+                }
+            }
+            .photosPicker(isPresented: $pickingPhotos, selection: $photos, matching: .images)
+            .onChange(of: photos) { _, picked in
+                guard !picked.isEmpty else { return }
+                photos = []
+                Task { await shelf.add(photos: picked) }
+            }
+            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.png, .jpeg, .webP, .gif],
+                          allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let files): Task { await shelf.add(files: files) }
+                case .failure(let error): shelf.error = error.localizedDescription
+                }
+            }
+            .onDrop(of: [.image], isTargeted: nil) { providers in
+                shelf.add(providers: providers)
+                return true
+            }
+    }
+
+    private func paste() {
+        if UIPasteboard.general.hasImages {
+            shelf.add(providers: UIPasteboard.general.itemProviders)
+        } else {
+            shelf.error = "There is no image on the clipboard."
         }
     }
 }

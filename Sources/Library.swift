@@ -327,6 +327,9 @@ func importImage(into folder: URL, from src: URL, now: String) throws -> String 
     return try add(into: folder, ext: src.pathExtension, now: now) { tmp in
         try? FileManager.default.removeItem(at: tmp)
         try FileManager.default.copyItem(at: src, to: tmp)
+        // A copy keeps the original's modification time, which would put an old image far down
+        // the galleries, not first as one just added
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: tmp.path)
     }
 }
 
@@ -829,8 +832,11 @@ enum Tests {
         let dir = tmpdir("add")
         let src = tmpdir("add-src").appendingPathComponent("x.JPG")
         png(src)
+        try! FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1000)], ofItemAtPath: src.path)
         let now = "2026-11-11T09:00:00+09:00"
         let id = try? importImage(into: dir, from: src, now: now)
+        let mtime = id.flatMap { try? FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent($0).path)[.modificationDate] as? Date }
+        check((mtime ?? .distantPast).timeIntervalSinceNow > -60, "an added image is modified now: \(String(describing: mtime))")
         check(id?.count == 40 && id?.hasSuffix(".JPG") == true && Array(id ?? "")[14] == "7", "import name: \(id ?? "")")
         if let id {
             let sidecar = read(sidecarURL(dir.appendingPathComponent(id))).flatMap { try? JSON(parsing: Data($0.utf8)) }

@@ -8,15 +8,17 @@ import SwiftUI
 /// The images of a gallery, one at a time, as Photos shows them: swipe for the next, pinch or
 /// double tap to zoom, tap to hide the bars
 struct Viewer: View {
-    /// The gallery the image was opened from
-    let ids: [String]
+    /// The gallery the image was opened from, less the images deleted here
+    @State private var ids: [String]
     @State private var current: String
     @State private var bars = Bars()
     @State private var showsInfo = false
+    @State private var deleting = false
     @Environment(Shelf.self) private var shelf
+    @Environment(\.dismiss) private var dismiss
 
     init(ids: [String], start: String) {
-        self.ids = ids
+        _ids = State(initialValue: ids)
         _current = State(initialValue: start)
     }
 
@@ -43,10 +45,14 @@ struct Viewer: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 ShareLink(item: shelf.library.file(current))
+                Button("Delete", systemImage: "trash") { deleting = true }
+                    .confirmsDeleting($deleting, delete: delete)
                 Button("Info", systemImage: "info.circle") { showsInfo.toggle() }
             }
         }
-        .inspector(isPresented: $showsInfo) {
+        // Hiding the bars leaves the image alone on the screen: Info goes with them, and comes
+        // back with them
+        .inspector(isPresented: Binding { showsInfo && !bars.hidden } set: { showsInfo = $0 }) {
             // Made anew for each image: the old one saves as it goes
             Info(id: current)
                 .id(current)
@@ -55,6 +61,18 @@ struct Viewer: View {
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
         .zoomDestination(current)
+    }
+
+    /// Deletes the image shown, and shows the next, or the one before the last. Goes back after
+    /// the only one
+    private func delete() {
+        guard let index = ids.firstIndex(of: current), shelf.remove(current) else { return }
+        ids.remove(at: index)
+        if ids.isEmpty {
+            dismiss()
+        } else {
+            current = ids[min(index, ids.count - 1)]
+        }
     }
 
     /// The image's title, or its file name

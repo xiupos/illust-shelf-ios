@@ -37,6 +37,7 @@ The path of `cases.json` may be given as an argument; the default is `~/Projects
 - **IDs** are paths relative to the folder, compared part by part by their bytes, as Rust compares paths. The folder's own path changes on iOS, so nothing stores it; the folder is kept as a bookmark.
 - **Scanning** follows symlinks, walks a folder reached twice once, and counts a file reached twice once.
 - **Thumbnails** are not made by a load, unlike the GTK app's: the grid makes them as tiles come into view (SPEC, "Left to the implementation"). They are 512 px center-cropped JPEGs in `Caches/thumbs/<cacheID>/`, named by the SHA-1 of the ID. The cache folder is made new for each chosen folder. EXIF orientation is applied.
+- **Adding** sets the copy's modification time to now. `FileManager.copyItem` keeps the original's, unlike Rust's `fs::copy`, and galleries are ordered by it.
 - **Removing** deletes the image and its sidecar: there is no trash for the user's folders on iOS.
 - `timestamp()` is here, not in `UI.swift`, so that the tests can check it.
 
@@ -48,7 +49,9 @@ The path of `cases.json` may be given as an argument; the default is `~/Projects
 - **Galleries are not refreshed** by edits: `Gallery` makes its list again only for a search, a reload (`Shelf.generation`), or another tag.
 - **The viewer** pages with a `UIPageViewController` (`Pager`), not a SwiftUI `ScrollView` or `TabView`: both were tried, and both stop between two pages, the scroll view when the window or the Info column changes its size, the tab view when it ignores the safe area. The pages are hosted outside the viewer's view tree, so they share `Bars` with it instead of the environment. While the bars show, the image is fitted between them: the `GeometryReader` that measures them must keep to the safe area, and only the pager inside it ignores it. Zooming is a `UIScrollView` (`ZoomableImage`), so that paging takes over at the image's edge.
 - **The tab bar** is hidden by `Stack`, from what its path shows, not by the viewer: a bar that a page hides does not always come back when the page is left with the zoom transition.
-- **Info** is an `.inspector`: a column on an iPad, a sheet on an iPhone. It is made anew for each image, reads the sidecar again when it appears, and saves as edits are made. Tags and URLs are removed by swiping, as list rows are.
+- **Info** is an `.inspector`: a column on an iPad, a sheet on an iPhone. It hides with the bars, and comes back with them. It is made anew for each image, reads the sidecar again when it appears, and saves as edits are made. Tags and URLs are removed by swiping, as list rows are.
+- **Adding.** Every way in (the photo library, files, the clipboard, a drop) ends in `Shelf.add(files:)`, with files in a temporary folder where the source has none. A file with one of the library's extensions is copied as it is; anything else that decodes, such as a HEIC photo, is added as a PNG, as the spec has image data without a file. The pickers are presented from the page, not from the menu in its toolbar, where they do not appear.
+- **Deleting** asks first, from the button or the thumbnail it was chosen on. The viewer then shows the next image; `Pager` replaces its pages when `current` changes from outside.
 - **Input methods.** Never change the text of a field while the user types in it. Tag suggestions are rows to tap.
 
 ## Milestones
@@ -59,5 +62,5 @@ The path of `cases.json` may be given as an argument; the default is `~/Projects
 - [x] M3: The image page: paging, zoom, sharing
 - [x] M4: Editing: Info panel, saving, suggestions, read-only sidecars
 - [x] M5: Tabs, Tags, tag galleries, Search, the zoom transition
-- [ ] M6: Adding (Photos, Files, paste, drop) and removing images
+- [x] M6: Adding (Photos, Files, paste, drop) and removing images
 - [ ] M7: Keyboard shortcuts, About, Dynamic Type and dark mode
