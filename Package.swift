@@ -32,7 +32,8 @@ let package = Package(
                 .landscapeLeft,
                 .portraitUpsideDown(.when(deviceFamilies: [.pad]))
             ],
-            appCategory: .graphicsDesign
+            appCategory: .graphicsDesign,
+            additionalInfoPlistContentFilePath: "Info.plist"
         )
     ],
     targets: [
