@@ -104,9 +104,8 @@ final class Shelf {
         }
     }
 
-    /// Copies the images into the folder, then loads it again. A file of another kind is added
-    /// as a PNG if it can be decoded, as image data without a file is. `failed` counts the
-    /// images that were lost before this
+    /// Copies the images into the folder, then reloads it. A file of another kind is added as a
+    /// PNG if it decodes. `failed` counts images already lost on the way, for the error
     func add(files: [URL], failed: Int = 0) async {
         guard let folder else { return }
         let now = timestamp()
@@ -138,29 +137,30 @@ final class Shelf {
 
     /// Adds images picked from the photo library
     func add(photos: [PhotosPickerItem]) async {
-        let folder = temporaryFolder()
-        var files: [URL] = []
-        for photo in photos {
-            guard let data = try? await photo.loadTransferable(type: Data.self) else { continue }
+        await add(photos) { photo, folder in
+            guard let data = try? await photo.loadTransferable(type: Data.self) else { return nil }
             let type = photo.supportedContentTypes.first?.preferredFilenameExtension ?? "image"
-            let file = folder.appendingPathComponent("\(files.count).\(type)")
-            if (try? data.write(to: file)) != nil { files.append(file) }
+            let file = folder.appendingPathComponent("\(UUID().uuidString).\(type)")
+            return (try? data.write(to: file)) != nil ? file : nil
         }
-        await add(files: files, failed: photos.count - files.count)
-        try? FileManager.default.removeItem(at: folder)
     }
 
     /// Adds dropped or pasted images
-    func add(providers: [NSItemProvider]) {
-        Task {
-            let folder = temporaryFolder()
-            var files: [URL] = []
-            for provider in providers {
-                if let file = await copy(of: provider, into: folder) { files.append(file) }
-            }
-            await add(files: files, failed: providers.count - files.count)
-            try? FileManager.default.removeItem(at: folder)
+    func add(providers: [NSItemProvider]) async {
+        await add(providers, copying: copy(of:into:))
+    }
+
+    /// Adds images that have no file of their own: `copy` writes each into a temporary folder,
+    /// which is removed after. One it makes no file of could not be added
+    private func add<Source>(_ sources: [Source], copying copy: (Source, URL) async -> URL?) async {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("adding-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var files: [URL] = []
+        for source in sources {
+            if let file = await copy(source, folder) { files.append(file) }
         }
+        await add(files: files, failed: sources.count - files.count)
     }
 
     /// Deletes the image and its sidecar. false if that fails
@@ -184,13 +184,6 @@ final class Shelf {
     private var thumbs: URL {
         URL.cachesDirectory.appendingPathComponent("thumbs/\(cacheID)")
     }
-}
-
-/// A new folder for the files of images on their way into the library
-private func temporaryFolder() -> URL {
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("adding-\(UUID().uuidString)")
-    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    return folder
 }
 
 /// The provider's image as a file in `folder`, with the extension of its kind
@@ -230,9 +223,8 @@ struct RootView: View {
                     Tab("Library", systemImage: "photo.on.rectangle") {
                         Stack { LibraryPage() }
                     }
-                    // A search tab where the tab bar is at the top: a magnifying glass. Where it is
-                    // at the bottom, an ordinary tab: a search tab would make the bar the search
-                    // field, at the bottom
+                    // An ordinary tab where the tab bar is at the bottom, which a search tab would
+                    // turn into its search field
                     if sizeClass == .regular {
                         Tab(role: .search) {
                             Stack { SearchPage() }
@@ -312,8 +304,8 @@ struct Stack<Root: View>: View {
                 }
             }
         }
-        // Over the whole tab, bars and all, as Photos shows a photo: not a page of the stack,
-        // which would have to hide the tab bar, and settles a moment after it appears
+        // Over the whole tab, bars and all, as Photos shows a photo. A page would have to hide
+        // the tab bar
         .fullScreenCover(item: $router.viewing) { viewing in
             Viewer(ids: viewing.ids, start: viewing.id)
         }
@@ -355,7 +347,7 @@ enum TileSize: String, CaseIterable {
     }
 }
 
-/// The Library tab's menu: the thumbnail size and the folder
+/// The Library tab's menu: thumbnail size, reloading, the folder, About
 struct LibraryMenu: View {
     @Environment(Shelf.self) private var shelf
     @AppStorage("tileSize") private var tileSize = TileSize.medium
@@ -449,14 +441,15 @@ private struct AddsImages: ViewModifier {
                 }
             }
             .onDrop(of: [.image], isTargeted: nil) { providers in
-                shelf.add(providers: providers)
+                Task { await shelf.add(providers: providers) }
                 return true
             }
     }
 
     private func paste() {
         if UIPasteboard.general.hasImages {
-            shelf.add(providers: UIPasteboard.general.itemProviders)
+            let providers = UIPasteboard.general.itemProviders
+            Task { await shelf.add(providers: providers) }
         } else {
             shelf.error = "There is no image on the clipboard."
         }

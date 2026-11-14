@@ -44,8 +44,7 @@ struct Viewer: View {
                             .keyboardShortcut("i")
                     }
                 }
-                // Hiding the bars leaves the image alone on the screen: Info goes with them,
-                // and comes back with them
+                // Info hides and comes back with the bars
                 .inspector(isPresented: Binding { showsInfo && !hidden } set: { showsInfo = $0 }) {
                     // Made anew for each image: the old one saves as it goes
                     Info(id: current)
@@ -60,16 +59,14 @@ struct Viewer: View {
     }
 
     private var pages: some View {
-        // The pages are as tall as the screen, under the bars as well: the bars have no title,
-        // and an image under them does not move when they hide. Not as wide: the Info column
-        // is in the safe area on the side, and the image is kept out from under it
+        // Full height, under the bars, so that the image does not move when they hide. Within
+        // the safe area on the sides, where the Info column is
         Pager(ids: ids, current: $current) { id in
             ImagePage(file: shelf.library.file(id), hidden: $hidden)
         }
         .ignoresSafeArea(edges: .vertical)
         .background(hidden ? Color.black : Color(uiColor: .systemBackground))
-        // For a keyboard: the arrow keys page. Not seen, but not `hidden()`, which would take
-        // the keys from them too
+        // The arrow keys page. Invisible, not `hidden()`, which would disable the shortcuts
         .background {
             Group {
                 Button("Previous") { step(-1) }
@@ -84,8 +81,7 @@ struct Viewer: View {
 
     /// Shows the image `by` places further on in the gallery, if there is one
     private func step(_ by: Int) {
-        guard let index = ids.firstIndex(of: current), ids.indices.contains(index + by) else { return }
-        current = ids[index + by]
+        if let next = ids.neighbour(of: current, by: by) { current = next }
     }
 
     /// Deletes the image shown, and shows the next, or the one before the last. Closes after

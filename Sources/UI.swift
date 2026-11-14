@@ -232,10 +232,8 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
         }
 
         private func neighbour(of controller: UIViewController, by step: Int) -> UIViewController? {
-            guard let id = id(of: controller), let index = parent.ids.firstIndex(of: id),
-                  parent.ids.indices.contains(index + step)
-            else { return nil }
-            return self.controller(for: parent.ids[index + step])
+            guard let id = id(of: controller), let next = parent.ids.neighbour(of: id, by: step) else { return nil }
+            return self.controller(for: next)
         }
 
         func pageViewController(_ pager: UIPageViewController,
@@ -254,6 +252,14 @@ struct Pager<Page: View>: UIViewControllerRepresentable {
                 parent.current = id
             }
         }
+    }
+}
+
+extension Array where Element: Equatable {
+    /// The element `step` places from `element`, if there is one
+    func neighbour(of element: Element, by step: Int) -> Element? {
+        guard let index = firstIndex(of: element), indices.contains(index + step) else { return nil }
+        return self[index + step]
     }
 }
 
@@ -333,7 +339,7 @@ struct ZoomableImage: UIViewRepresentable {
             showsVerticalScrollIndicator = false
             contentInsetAdjustmentBehavior = .never
             decelerationRate = .fast
-            // The image is under the viewer's bars, which have no title: not blurred at its top
+            // The image runs under the viewer's bars: no blur at its top
             topEdgeEffect.isHidden = true
             imageView.contentMode = .scaleAspectFit
             addSubview(imageView)

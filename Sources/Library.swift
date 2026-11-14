@@ -172,9 +172,9 @@ struct TagSection: Identifiable {
     var id: String { namespace }
 }
 
-/// The tags by namespace, for the Tags tab. `tags` is in the order of `Library.tags()`, which each
-/// section keeps. Namespaces are in the order of their most used tag; the tags without one ("")
-/// come last
+/// The tags by namespace, for an empty Search. Each section keeps the order of `tags`, which is
+/// that of `Library.tags()`. Namespaces are in the order of their most used tag; tags without
+/// one ("") come last
 func sections(_ tags: [Tag]) -> [TagSection] {
     var sections: [TagSection] = []
     for tag in tags {
