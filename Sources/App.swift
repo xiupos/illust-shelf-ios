@@ -208,7 +208,7 @@ private func copy(of provider: NSItemProvider, into folder: URL) async -> URL? {
 
 // MARK: - Tabs
 
-/// Library, Tags, and Search, as in Photos. Before a folder is chosen, an invitation to choose one
+/// Library and Search, as in Photos. Before a folder is chosen, an invitation to choose one
 struct RootView: View {
     @Environment(Shelf.self) private var shelf
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -229,9 +229,6 @@ struct RootView: View {
                 TabView {
                     Tab("Library", systemImage: "photo.on.rectangle") {
                         Stack { LibraryPage() }
-                    }
-                    Tab("Tags", systemImage: "tag") {
-                        Stack { TagsPage() }
                     }
                     // A search tab where the tab bar is at the top: a magnifying glass. Where it is
                     // at the bottom, an ordinary tab: a search tab would make the bar the search
@@ -358,7 +355,7 @@ enum TileSize: String, CaseIterable {
     }
 }
 
-/// The menu of the Library and Tags tabs: the thumbnail size and the folder
+/// The Library tab's menu: the thumbnail size and the folder
 struct LibraryMenu: View {
     @Environment(Shelf.self) private var shelf
     @AppStorage("tileSize") private var tileSize = TileSize.medium

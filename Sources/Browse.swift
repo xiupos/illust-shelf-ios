@@ -101,15 +101,40 @@ struct LibraryPage: View {
     }
 }
 
-// MARK: - Tags
+// MARK: - Search
 
-/// The Tags tab: a shelf of tags for each namespace
-struct TagsPage: View {
+/// The Search tab. Before anything is typed, a shelf of tags for each namespace, to browse; then
+/// the tags and the images that match
+struct SearchPage: View {
     @Environment(Shelf.self) private var shelf
+    @State private var query = ""
 
     var body: some View {
+        let text = query.trimmed
+        Group {
+            if text.isEmpty {
+                shelves
+            } else {
+                let tags = searchTags(shelf.tags, text)
+                Gallery(tag: nil, query: query, noResults: tags.isEmpty) {
+                    if !tags.isEmpty {
+                        TagShelf(tags: tags, fullNames: true)
+                            .padding(.vertical)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Search")
+        .toolbarTitleDisplayMode(.inlineLarge)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "Titles, Notes, and Tags")
+        .textInputAutocapitalization(.never)
+    }
+
+    /// The tags, by namespace. A section's heading opens all the tags of its namespace
+    private var shelves: some View {
         let shelves = sections(shelf.tags)
-        ScrollView {
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 28) {
                 ForEach(shelves) { section in
                     VStack(alignment: .leading, spacing: 10) {
@@ -135,12 +160,6 @@ struct TagsPage: View {
                 ContentUnavailableView("No Tags", systemImage: "tag",
                                        description: Text("Tags you add to illustrations appear here."))
             }
-        }
-        .navigationTitle("Tags")
-        .toolbarTitleDisplayMode(.inlineLarge)
-        .addsImages()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { LibraryMenu() }
         }
     }
 }
@@ -226,36 +245,5 @@ struct TagCard: View {
             }
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Search
-
-/// The Search tab: the tags and the images that match
-struct SearchPage: View {
-    @Environment(Shelf.self) private var shelf
-    @State private var query = ""
-
-    var body: some View {
-        let text = query.trimmed
-        let tags = text.isEmpty ? [] : searchTags(shelf.tags, text)
-        Group {
-            if text.isEmpty {
-                ContentUnavailableView("Search", systemImage: "magnifyingglass",
-                                       description: Text("Find illustrations by title, note, or tag."))
-            } else {
-                Gallery(tag: nil, query: query, noResults: tags.isEmpty) {
-                    if !tags.isEmpty {
-                        TagShelf(tags: tags, fullNames: true)
-                            .padding(.vertical)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Search")
-        .toolbarTitleDisplayMode(.inlineLarge)
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: "Titles, Notes, and Tags")
-        .textInputAutocapitalization(.never)
     }
 }

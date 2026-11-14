@@ -18,7 +18,7 @@ It is one of the Illust Shelf apps, each an implementation of its own for its pl
 | File | Contents |
 |---|---|
 | `Sources/App.swift` | `@main`, `Shelf` (the library, loading, the folder's bookmark, adding and removing), the tabs, navigation (`Route`, `Router`, `Stack`), settings |
-| `Sources/Browse.swift` | `Gallery`, and the pages of the Library, Tags, and Search tabs |
+| `Sources/Browse.swift` | `Gallery`, and the pages of the Library and Search tabs |
 | `Sources/Detail.swift` | `Viewer`: one image at a time. `Info`: the editor of its sidecar |
 | `Sources/Library.swift` | Foundation only, and all of the shared behaviour: scanning, sidecars, filtering, tags, saving, adding, removing, JSON. Has the tests |
 | `Sources/UI.swift` | Thumbnails, the zoom transition, the pager, the zoomable image |
@@ -46,8 +46,8 @@ They read `spec/cases.json` of this project, found from the source file's own pa
 
 ## UI
 
-- **An iOS app.** The spec decides what the app does, and leaves how it looks to the platform. The screens follow Photos: three tabs, a grid that a thumbnail grows out of into its image, an Info panel. Native SwiftUI only: no custom chrome.
-- **Tabs.** Library (every image), Tags (a shelf of tags for each namespace), and Search (the tags and the images that match). The spec's "top screen with a search for each" is these three. A section's heading opens all the tags of its namespace, which is what the spec's search for `<namespace>:` finds. Library and Tags have the same buttons: + to add images, and a menu (`LibraryMenu`) with the thumbnail size, which sizes the tags' cards as well, reloading, and the folder.
+- **An iOS app.** The spec decides what the app does, and leaves how it looks to the platform. The screens follow Photos: two tabs, a grid that a thumbnail grows out of into its image, an Info panel. Native SwiftUI only: no custom chrome.
+- **Tabs.** Library (every image) and Search. Search, before anything is typed, shows a shelf of tags for each namespace, as Music shows categories to browse; then the tags and the images that match. The spec's "top screen with a search for each" is these. A section's heading opens all the tags of its namespace, which is what the spec's search for `<namespace>:` finds. Library has + to add images, and a menu (`LibraryMenu`) with the thumbnail size, which sizes the tags' cards as well, reloading, and the folder.
 - **Search fields** are at the top, under the navigation bar (`.navigationBarDrawer`), not at the bottom, where iOS 26 puts them. So where the tab bar is at the bottom (compact width), the Search tab is an ordinary tab: with `role: .search`, the tab bar would become the search field. Where the tab bar is at the top, it is a search tab, which shows as a magnifying glass.
 - **Titles.** A tab's first page has its title large, in the row of its buttons (`.inlineLarge`), not under them: `.large` leaves that row empty on an iPhone where the page has no buttons, as Search has none.
 - **Navigation.** Each tab is a `Stack` with its own `Router`. Pages are `Route` values; only `Stack` turns them into views. The viewer is not a page: it is a full screen cover over the tab (`Router.viewing`), as a photo is in Photos. As a page it had to hide the tab bar, which on an iPad is above the navigation bar: the bars, and the image fitted between them, moved a moment after the page appeared, and the tab bar did not always come back. Opening a tag from an image closes the viewer and replaces the pages above the tab's first with the tag's gallery (`Router.open(tag:)`).
