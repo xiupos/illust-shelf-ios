@@ -194,12 +194,15 @@ func searchTags(_ tags: [Tag], _ query: String) -> [Tag] {
 }
 
 /// Tags to offer while `text` is typed as a new tag of an image: the first `suggestionCount` of
-/// `known` (every tag in use, most used first) that start with it, ignoring case, and are not
-/// `attached` to the image yet
+/// `known` (every tag in use, most used first) that contain it, ignoring case, and are not
+/// `attached` to the image yet. Those that start with it come first
 func suggest(_ known: [String], attached: [String], text: String) -> [String] {
     let text = text.trimmed.lowercased()
     guard !text.isEmpty else { return [] }
-    return Array(known.filter { $0.lowercased().hasPrefix(text) && !attached.contains($0) }.prefix(suggestionCount))
+    let found = known.filter { $0.lowercased().contains(text) && !attached.contains($0) }
+    let starts = found.filter { $0.lowercased().hasPrefix(text) }
+    let rest = found.filter { !$0.lowercased().hasPrefix(text) }
+    return Array((starts + rest).prefix(suggestionCount))
 }
 
 /// Adds `value`, trimmed, to an image's tags or URLs. false if it is empty or already there

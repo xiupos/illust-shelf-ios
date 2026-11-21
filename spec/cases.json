@@ -109,13 +109,15 @@
     ]
   },
   "suggestions": {
-    "known": ["creator:Alice", "cat", "Cb", "cc", "cd", "ce", "cf", "dog"],
+    "known": ["creator:Alice", "cat", "Cb", "cc", "cd", "ce", "cf", "dog", "hotdog", "Doge"],
     "cases": [
       { "text": " C", "attached": ["cat"], "expect": ["creator:Alice", "Cb", "cc", "cd", "ce"] },
-      { "text": "og", "attached": [], "expect": [] },
+      { "text": "og", "attached": [], "expect": ["dog", "hotdog", "Doge"] },
+      { "text": "dog", "attached": [], "expect": ["dog", "Doge", "hotdog"] },
+      { "text": "LIC", "attached": [], "expect": ["creator:Alice"] },
       { "text": "  ", "attached": [], "expect": [] },
-      { "text": "DOG", "attached": [], "expect": ["dog"] },
-      { "text": "dog", "attached": ["dog"], "expect": [] }
+      { "text": "DOG", "attached": ["Doge"], "expect": ["dog", "hotdog"] },
+      { "text": "dog", "attached": ["dog", "hotdog", "Doge"], "expect": [] }
     ]
   }
 }
