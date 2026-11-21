@@ -35,6 +35,9 @@ final class Shelf {
     /// Whether the folder picker is shown
     var choosingFolder = false
     var showingAbout = false
+    /// The tag being renamed, and its new name, in an alert
+    var renaming: String?
+    var newName = ""
 
     private var started = 0
     /// Names the folder of thumbnails, which is made new for each chosen folder
@@ -163,6 +166,23 @@ final class Shelf {
         await add(files: files, failed: sources.count - files.count)
     }
 
+    /// Asks for a new name for the tag
+    func askRename(_ tag: String) {
+        newName = tag
+        renaming = tag
+    }
+
+    /// Renames the tag in every image that has it. A name in use already merges the two
+    func rename(_ old: String, to new: String) {
+        let (_, failed) = library.renameTag(old, new, now: timestamp())
+        tags = library.tags()
+        switch failed {
+        case 0: break
+        case 1: error = "An image could not be changed."
+        case let count: error = "\(count) images could not be changed."
+        }
+    }
+
     /// Deletes the image and its sidecar. false if that fails
     @discardableResult
     func remove(_ id: String) -> Bool {
@@ -244,6 +264,18 @@ struct RootView: View {
             }
         }
         .sheet(isPresented: $shelf.showingAbout) { About() }
+        .alert("Rename Tag", isPresented: Binding { shelf.renaming != nil } set: { if !$0 { shelf.renaming = nil } }) {
+            TextField("Tag", text: $shelf.newName)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                if let old = shelf.renaming { shelf.rename(old, to: shelf.newName) }
+            }
+            .disabled(shelf.newName.trimmed.isEmpty || shelf.newName.trimmed == shelf.renaming)
+        } message: {
+            Text("Every image with it is changed. A name in use already merges the two.")
+        }
         .alert("Error", isPresented: Binding { shelf.error != nil } set: { if !$0 { shelf.error = nil } }) {
             Button("OK") {}
         } message: {

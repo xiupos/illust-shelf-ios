@@ -229,6 +229,7 @@ struct TagCard: View {
     let tag: Tag
     /// With the namespace, where tags of several are shown together
     var fullName = false
+    @Environment(Shelf.self) private var shelf
 
     var body: some View {
         NavigationLink(value: Route.tag(tag.name)) {
@@ -245,5 +246,8 @@ struct TagCard: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Rename Tag…", systemImage: "pencil") { shelf.askRename(tag.name) }
+        }
     }
 }

@@ -205,6 +205,19 @@ func suggest(_ known: [String], attached: [String], text: String) -> [String] {
     return Array((starts + rest).prefix(suggestionCount))
 }
 
+/// An image's tags with `old` renamed to `new`, trimmed; a tag it then has twice is kept where it
+/// came first. nil if that changes nothing: the image does not have `old`, or `new` is blank or
+/// `old`
+func renamed(_ tags: [String], _ old: String, _ new: String) -> [String]? {
+    let new = new.trimmed
+    guard !new.isEmpty, new != old, tags.contains(old) else { return nil }
+    var out: [String] = []
+    for tag in tags.map({ $0 == old ? new : $0 }) where !out.contains(tag) {
+        out.append(tag)
+    }
+    return out
+}
+
 /// Adds `value`, trimmed, to an image's tags or URLs. false if it is empty or already there
 @discardableResult
 func pushUnique(_ list: inout [String], _ value: String) -> Bool {
@@ -302,6 +315,23 @@ struct Library {
         }
         try writeJSON(url, meta.json)
         items[i].meta = meta
+    }
+
+    /// Renames a tag in every image that has it, each read again first (`renamed`). Returns the
+    /// number of images changed, and of those that could not be, such as read-only ones
+    mutating func renameTag(_ old: String, _ new: String, now: String) -> (changed: Int, failed: Int) {
+        var result = (changed: 0, failed: 0)
+        for id in items.filter({ $0.meta.tags.contains(old) }).map(\.id) {
+            refresh(id)
+            guard var meta = get(id)?.meta, let tags = renamed(meta.tags, old, new) else { continue }
+            meta.tags = tags
+            if (try? save(id, meta, now: now)) != nil {
+                result.changed += 1
+            } else {
+                result.failed += 1
+            }
+        }
+        return result
     }
 
     /// Re-reads the item's sidecar
@@ -733,6 +763,7 @@ enum Tests {
         jsonRoundTrip()
         readOnly()
         tagRules()
+        renaming()
         adding()
         removing()
         symlinks()
@@ -805,6 +836,11 @@ enum Tests {
             check(names == s["expect"]!.strings!, "tag search \(s.pretty()): \(names)")
         }
 
+        for r in cases["renames"]!.array! {
+            let found = renamed(r["tags"]!.strings!, r["old"]!.string!, r["new"]!.string!)
+            check(found == r["expect"]!.strings, "renames \(r.pretty()): \(String(describing: found))")
+        }
+
         let suggestions = cases["suggestions"]!
         let known = suggestions["known"]!.strings!
         for s in suggestions["cases"]!.array! {
@@ -842,6 +878,37 @@ enum Tests {
         check(pushUnique(&tags, " b ") && !pushUnique(&tags, "a ") && !pushUnique(&tags, " ") && tags == ["a", "b"],
               "adding a tag: \(tags)")
         check(splitTag("creator:Na:me") == ("creator", "Na:me") && splitTag("plain") == ("", "plain"), "namespaces")
+    }
+
+    /// What the cases do not say: which images are written, read-only ones, and reading again
+    static func renaming() {
+        let dir = tmpdir("rename")
+        let sidecars = [
+            ("a.png", #"{"v": 1, "title": "a", "tags": ["cat", "x"]}"#),
+            ("b.png", #"{"v": 1, "tags": ["dog"]}"#),
+            ("c.png", #"{"v": 2, "tags": ["cat"]}"#),
+            ("d.png", #"{"v": 1, "tags": ["cat"]}"#),
+        ]
+        for (name, text) in sidecars {
+            png(dir.appendingPathComponent(name))
+            try! Data(text.utf8).write(to: sidecarURL(dir.appendingPathComponent(name)))
+        }
+        var lib = Library(loading: dir)
+        // Changed elsewhere since it was read
+        try! Data(#"{"v": 1, "title": "new", "tags": ["cat"]}"#.utf8).write(to: sidecarURL(dir.appendingPathComponent("d.png")))
+        let before = read(sidecarURL(dir.appendingPathComponent("b.png")))
+        let result = lib.renameTag("cat", "dog", now: "2026-11-11T09:00:00+09:00")
+        check(result == (2, 1), "renaming: \(result)")
+        let json = { (name: String) in
+            read(sidecarURL(dir.appendingPathComponent(name))).flatMap { try? JSON(parsing: Data($0.utf8)) }
+        }
+        check(json("a.png") == (try? JSON(parsing: Data(#"{"v": 1, "title": "a", "tags": ["dog", "x"]}"#.utf8))), "renamed a")
+        check(json("d.png") == (try? JSON(parsing: Data(#"{"v": 1, "title": "new", "tags": ["dog"]}"#.utf8))), "renamed d, read again")
+        check(read(sidecarURL(dir.appendingPathComponent("b.png"))) == before, "b is not written")
+        check(json("c.png")?["v"] == .number("2"), "read-only c is not written")
+        let tags = lib.tags().map { "\($0.name) \($0.count)" }
+        check(tags == ["dog 3", "cat 1", "x 1"], "tags after renaming: \(tags)")
+        check(lib.renameTag("missing", "y", now: "") == (0, 0), "renaming a missing tag")
     }
 
     static func adding() {

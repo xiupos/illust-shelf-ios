@@ -108,6 +108,15 @@
       { "query": "z", "expect": [] }
     ]
   },
+  "renames": [
+    { "tags": ["a", "b", "c"], "old": "b", "new": "x", "expect": ["a", "x", "c"] },
+    { "tags": ["a", "b", "x"], "old": "b", "new": "x", "expect": ["a", "x"] },
+    { "tags": ["x", "b"], "old": "b", "new": " x ", "expect": ["x"] },
+    { "tags": ["a", "b"], "old": "b", "new": "B", "expect": ["a", "B"] },
+    { "tags": ["a", "B"], "old": "b", "new": "x", "expect": null },
+    { "tags": ["a", "b"], "old": "b", "new": "  ", "expect": null },
+    { "tags": ["a", "b"], "old": "b", "new": " b ", "expect": null }
+  ],
   "suggestions": {
     "known": ["creator:Alice", "cat", "Cb", "cc", "cd", "ce", "cf", "dog", "hotdog", "Doge"],
     "cases": [
